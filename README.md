@@ -12,3 +12,7 @@ The current version has the CHARMM General Force Field implemented in that way.
 
 Ready-to-run examples can be found in the directory with that name. 
 
+```bash
+some Courier text
+```
+
