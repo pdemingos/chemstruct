@@ -1,3 +1,5 @@
+# Copyright 2019 Pedro G. Demingos
+
 """
 Defines classes for dealing with LAMMPS input and output files.
 
@@ -19,67 +21,6 @@ from tools import linear_counter
 from files.main import File, find_between, clear_end
 from files.csv import Csv
 from files.xyz import Xyz
-
-
-def cfg_dir_to_atomic_densities(dir_path: str, axis: str, bins: int,
-                                ignore_types=None):
-    """
-    Reads position of every atom from all cfg files in the directory,
-    and writes csv files with atom count along one dimension
-    for every atomic type found.
-
-    Parameters
-    ----------
-    dir_path : str
-        Path to directory containing the cfg files.
-    axis : str
-        Axis along which the atoms shall be counted.
-        Expected: 'x' or 'y' or 'z'.
-    bins : int
-        Number of bins i.e. in how many parts the axis shall be divided.
-        Determines density resolution. Mind the cell size.
-    ignore_types : list of strings, optional
-        Atomic types that shall not be counted. For optimization only.
-
-    Notes
-    -----
-    Non-cfg files may be present in the directory. Only files ending in
-    '.cfg' will be considered.
-    Can be used to compute Potential Mean Force (PMF).
-
-    """
-
-    if ignore_types is None:
-        ignore_types = []
-
-    positions = dict()
-    # keys are strings with atom types, values are lists with position in axis
-
-    all_entries = os.listdir(dir_path)
-    cfg_paths = [dir_path + "/" + entry for entry in all_entries if entry.endswith(".cfg")]
-
-    print("Computing cfg files...")
-    counter = 1
-    for cfg_path in cfg_paths:
-        cfg = Cfg(cfg_path, ignore_types=ignore_types)
-        if not positions:
-            for atom_type in cfg.atoms.atom_types:
-                if atom_type not in ignore_types:
-                    positions[str(atom_type)] = []
-        for atom in cfg.atoms:
-            try:
-                positions[str(atom.type)].append(atom.position)
-            except KeyError:
-                continue
-        if counter % 10 == 0:
-            print("{}/{} cfg files computed...".format(counter, len(cfg_paths)))
-        counter += 1
-
-    print("Writing csv files...")
-    for (atom_type, type_positions) in positions.items():
-        csv_name = dir_path + "/" + "[" + axis + "." + str(bins) + "." + atom_type + "].csv"
-        linear_counter(type_positions, axis, bins, output_path=csv_name)
-    print("Done")
 
 
 class LmpDat(File):

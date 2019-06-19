@@ -19,7 +19,7 @@ write_lmpdat(xyz, lmp)
 # here's what you'll have to do:
 #
 # first, the charges
-# (CGenFF has no one-to-one atomtype-charge correspondence, that why)
+# (CGenFF has no one-to-one atomtype-charge correspondence, that's why)
 # "0.00" is ok for "CG301" since all neighboring groups are neutral
 # "-0.09" is ok for "CG311" since its bonded to one H with charge "+0.09"
 #

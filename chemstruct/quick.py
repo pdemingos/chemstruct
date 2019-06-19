@@ -11,7 +11,9 @@ def write_lmpdat(xyz_file: str, lmpdat_file: str, par_file=None,
                  periodic="", simple=False):
 
     """
-    Writes a LAMMPS Data file with atom_style='full'.
+    Writes a LAMMPS Data file with atom_style='full' from xyz file,
+    using parameters from the CHARMM General Force Field.
+    Requires user to manually check a generated parameters (par) file.
 
     Parameters
     ----------
@@ -37,7 +39,17 @@ def write_lmpdat(xyz_file: str, lmpdat_file: str, par_file=None,
     be modified with the parameters not specified by the potential, like
     charges for CGenFF and possibly other structures.
 
+    If a system is periodic in all directions, but one of its dimensions is
+    such that it's only divided into 1 or 2 regions, simple=True should be
+    used to avoid bugs.
+
+    Examples
+    --------
+    See directory 'examples'.
+
     """
+
+    periodic = periodic.lower()
 
     # CGenFF parameters from their original paper
     prm_file = PACKAGE_DIR + "/par_all36_cgenff.prm"
@@ -87,7 +99,19 @@ def finish_lmpdat(xyz_types_file: str, lmpdat_file: str, par_file: str,
         bonds, angles and dihedrals. (For small systems. See Notes.)
         Standard is False.
 
+    Notes
+    -----
+    If a system is periodic in all directions, but one of its dimensions is
+    such that it's only divided into 1 or 2 regions, simple=True should be
+    used to avoid bugs.
+
+    Examples
+    --------
+    See directory 'examples'.
+
     """
+
+    periodic = periodic.lower()
 
     lmp = LmpDat()
     lmp.get_xyz(xyz_types_file)

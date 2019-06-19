@@ -348,7 +348,7 @@ class Atoms:
         ----------
         periodic : str, optional
             Axes in which the system is periodic (e.g. 'xyz', 'xy', 'z';
-            use an empty string '' for non-periodic). Standard is False.
+            use an empty string '' for non-periodic). Standard is ''.
         impropers : bool, optional
             If improper dihedrals are wanted. Standard is True.
         complete : bool, optional
@@ -451,7 +451,7 @@ class Atoms:
             'bonds', 'angles' or 'dihedrals'.
         periodic : str, optional
             Axes in which the system is periodic (e.g. 'xyz', 'xy', 'z';
-            use an empty string '' for non-periodic). Standard is False.
+            use an empty string '' for non-periodic). Standard is ''.
         simple : bool, optional
             If a simple, less optimised algorithm is wanted for computing
             bonds, angles and dihedrals. (For small systems. See Notes.)

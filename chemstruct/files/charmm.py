@@ -1,3 +1,5 @@
+# Copyright 2019 Pedro G. Demingos
+
 """
 Defines the CharmmGeneral class for dealing with
 CHARMM General Force Field parameters and atomic systems.

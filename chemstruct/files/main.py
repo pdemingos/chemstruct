@@ -1,5 +1,6 @@
-"""Basic functions and class for files."""
+# Copyright 2019 Pedro G. Demingos
 
+"""Basic functions and class for files."""
 
 import os
 
@@ -51,42 +52,6 @@ def find_between(line: str, char1: str, char2: str, nth_time=1):
         else:
             this_time += 1
             between = ""
-
-
-def break_at_whitespaces(line: str):
-    # do NOT use this
-    # use str.split() then tuple() instead
-    """
-    Breaks given string at whitespaces (" ", "\t", "\n").
-    Returns tuple of substrings.
-
-    Parameters
-    ----------
-    line : str
-        String to be broken.
-
-    Returns
-    -------
-    broken : tuple
-        All substrings (in order) broken from the given line.
-
-    """
-
-    whitespaces = [" ", "\t", "\n"]  # etc
-    broken = []
-    next_term = ""
-
-    for char in line:
-        if char not in whitespaces:
-            next_term += char
-        elif next_term != "":
-            broken.append(next_term)
-            next_term = ""
-    if next_term != "":
-        broken.append(next_term)
-
-    broken = tuple(broken)
-    return broken
 
 
 def clear_end(line: str, chars: list):

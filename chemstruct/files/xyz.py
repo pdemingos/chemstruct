@@ -1,5 +1,6 @@
-"""Class for xyz (atomic coordinates) files."""
+# Copyright 2019 Pedro G. Demingos
 
+"""Class for xyz (atomic coordinates) files."""
 
 from files.main import File, find_between
 from atoms import Atom, Atoms
