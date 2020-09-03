@@ -1,0 +1,27 @@
+Atoms
+XWat	#Water
+XOil	#Oil
+XPhi	#HydroPhilic
+XPho	#HydroPhobic
+
+Bonds # Number of the bond - Which atoms are connected to
+1	XPhi	XPho
+1	XPhi	XPhi
+
+Pair Coeffs
+pair_style dpd 1 1 928398
+pair_coeff XWat XWat 25 4.5
+pair_coeff XOil XOil 25 4.5
+pair_coeff XPhi XPhi 35 4.5
+pair_coeff XPho XPho 25 4.5
+pair_coeff XWat XOil 80 4.5
+pair_coeff XWat XPhi 15 4.5
+pair_coeff XWat XPho 80 4.5
+pair_coeff XOil XPhi 80 4.5
+pair_coeff XOil XPho 25 4.5
+pair_coeff XPhi XPho 80 4.5
+
+Bond Coeffs
+bond_style      harmonic
+bond_coeff      1 100 0.7
+
