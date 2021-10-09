@@ -216,6 +216,16 @@ class LmpDat(File):
         # each of the titles above must appear exactly once
         # note that the area below the title may be left empty
 
+        # optional, for class2 FFs
+        bondbond_index = _params_file._find("BondBond Coeffs")
+        bondangle_index = _params_file._find("BondAngle Coeffs")
+        middlebond_index = _params_file._find("MiddleBondTorsion Coeffs")
+        endbond_index = _params_file._find("EndBondTorsion Coeffs")
+        angletorsion_index = _params_file._find("AngleTorsion Coeffs")
+        angleangletorsion_index = _params_file._find("AngleAngleTorsion Coeffs")
+        bondbond13_index = _params_file._find("BondBond13 Coeffs")
+        angleangle_index = _params_file._find("AngleAngle Coeffs")
+
         for lis in [atom_types_index, bond_types_index,
                     angle_types_index, dihedral_types_index,
                     improper_types_index]:
@@ -227,6 +237,41 @@ class LmpDat(File):
         angle_types_index = angle_types_index[0]
         dihedral_types_index = dihedral_types_index[0]
         improper_types_index = improper_types_index[0]
+
+        is_class2 = False
+        try:
+            bondbond_index = bondbond_index[0]
+            is_class2 = True
+        except IndexError:
+            bondbond_index = -1
+        try:
+            bondangle_index = bondangle_index[0]
+        except IndexError:
+            bondangle_index = -1
+        try:
+            middlebond_index = middlebond_index[0]
+        except IndexError:
+            middlebond_index = -1
+        try:
+            endbond_index = endbond_index[0]
+        except IndexError:
+            endbond_index = -1
+        try:
+            angletorsion_index = angletorsion_index[0]
+        except IndexError:
+            angletorsion_index = -1
+        try:
+            angleangletorsion_index = angleangletorsion_index[0]
+        except IndexError:
+            angleangletorsion_index = -1
+        try:
+            bondbond13_index = bondbond13_index[0]
+        except IndexError:
+            bondbond13_index = -1
+        try:
+            angleangle_index = angleangle_index[0]
+        except IndexError:
+            angleangle_index = -1
 
         # checks if there are multiple dihedrals
         self._multiple_dihedrals = False
@@ -242,7 +287,6 @@ class LmpDat(File):
                 continue
 
         # Atom Types
-
         index = 1
         for line in _params_file.content[atom_types_index + 1:bond_types_index]:
 
@@ -277,7 +321,6 @@ class LmpDat(File):
                 continue
 
         # Bond Types
-
         index = 1
         for line in _params_file.content[bond_types_index + 1:angle_types_index]:
 
@@ -286,6 +329,11 @@ class LmpDat(File):
                     typ, *params = tuple(line.split())
                     if typ not in BondType.instances_dict.keys():
                         BondType(typ)  # instantiates it
+                    if is_class2:
+                        increment, *params = tuple(params)
+                        bond_type = BondType.instances_dict[typ]
+                        bond_type.increment = float(increment)
+                        bond_type.first_atom = typ.split(":")[0]
                     params_nums = []
 
                     # just takes strings into the right numeric types
@@ -310,7 +358,6 @@ class LmpDat(File):
                 continue
 
         # Angle Types
-
         index = 1
         for line in _params_file.content[angle_types_index + 1:dihedral_types_index]:
 
@@ -343,7 +390,6 @@ class LmpDat(File):
                 continue
 
         # Dihedral Types
-
         index = 1
         for line in _params_file.content[dihedral_types_index + 1:improper_types_index]:
 
@@ -386,9 +432,11 @@ class LmpDat(File):
                 continue
 
         # Improper Types
-
         index = 1
         for line in _params_file.content[improper_types_index + 1:]:
+
+            if line.startswith("BondBond Coeffs"):
+                break
 
             try:
                 if line[0].isalpha():
@@ -418,8 +466,228 @@ class LmpDat(File):
             except IndexError:
                 continue
 
-        # moves charge from AtomType to each Atom
-        self._set_charges()
+        # BondBond Coeffs
+        for line in _params_file.content[bondbond_index + 1:bondangle_index]:
+
+            try:
+                if line[0].isalpha():
+                    typ, *params = tuple(line.split())
+                    params_nums = []
+
+                    # just takes strings into the right numeric types
+                    # if the str "1" becomes the float 1.0, LAMMPS may complain
+                    for param in params:
+                        try:
+                            if "." in param:
+                                param_num = float(param)
+                            else:
+                                param_num = int(param)
+                        except TypeError:
+                            raise TypeError("all BondBond parameters must be numbers, "
+                                            "at least one is not")
+                        except ValueError:  # if param=None
+                            param_num = None
+                        params_nums.append(param_num)
+
+                    # AngleType.instances_dict[typ].index = index
+                    AngleType.instances_dict[typ].bb = params_nums  # list
+            except IndexError:
+                continue
+
+        # BondAngle Coeffs
+        for line in _params_file.content[bondangle_index + 1:middlebond_index]:
+
+            try:
+                if line[0].isalpha():
+                    typ, *params = tuple(line.split())
+                    params_nums = []
+
+                    # just takes strings into the right numeric types
+                    # if the str "1" becomes the float 1.0, LAMMPS may complain
+                    for param in params:
+                        try:
+                            if "." in param:
+                                param_num = float(param)
+                            else:
+                                param_num = int(param)
+                        except TypeError:
+                            raise TypeError("all BondAngle parameters must be numbers, "
+                                            "at least one is not")
+                        except ValueError:  # if param=None
+                            param_num = None
+                        params_nums.append(param_num)
+
+                    # AngleType.instances_dict[typ].index = index
+                    AngleType.instances_dict[typ].ba = params_nums  # list
+            except IndexError:
+                continue
+
+        # MiddleBondTorsion Coeffs
+        for line in _params_file.content[middlebond_index + 1:endbond_index]:
+
+            try:
+                if line[0].isalpha():
+                    typ, *params = tuple(line.split())
+                    params_nums = []
+
+                    # just takes strings into the right numeric types
+                    # if the str "1" becomes the float 1.0, LAMMPS may complain
+                    for param in params:
+                        try:
+                            if "." in param:
+                                param_num = float(param)
+                            else:
+                                param_num = int(param)
+                        except TypeError:
+                            raise TypeError("all MiddleBondTorsion parameters must be numbers, "
+                                            "at least one is not")
+                        except ValueError:  # if param=None
+                            param_num = None
+                        params_nums.append(param_num)
+
+                    DihedralType.instances_dict[typ].mbt = params_nums  # list
+            except IndexError:
+                continue
+
+        # EndBondTorsion
+        for line in _params_file.content[endbond_index + 1:angletorsion_index]:
+
+            try:
+                if line[0].isalpha():
+                    typ, *params = tuple(line.split())
+                    params_nums = []
+
+                    # just takes strings into the right numeric types
+                    # if the str "1" becomes the float 1.0, LAMMPS may complain
+                    for param in params:
+                        try:
+                            if "." in param:
+                                param_num = float(param)
+                            else:
+                                param_num = int(param)
+                        except TypeError:
+                            raise TypeError("all EndBondTorsion parameters must be numbers, "
+                                            "at least one is not")
+                        except ValueError:  # if param=None
+                            param_num = None
+                        params_nums.append(param_num)
+
+                    DihedralType.instances_dict[typ].ebt = params_nums  # list
+            except IndexError:
+                continue
+
+        # AngleTorsion Coeffs
+        for line in _params_file.content[angletorsion_index + 1:angleangletorsion_index]:
+
+            try:
+                if line[0].isalpha():
+                    typ, *params = tuple(line.split())
+                    params_nums = []
+
+                    # just takes strings into the right numeric types
+                    # if the str "1" becomes the float 1.0, LAMMPS may complain
+                    for param in params:
+                        try:
+                            if "." in param:
+                                param_num = float(param)
+                            else:
+                                param_num = int(param)
+                        except TypeError:
+                            raise TypeError("all AngleTorsion parameters must be numbers, "
+                                            "at least one is not")
+                        except ValueError:  # if param=None
+                            param_num = None
+                        params_nums.append(param_num)
+
+                    DihedralType.instances_dict[typ].at = params_nums  # list
+            except IndexError:
+                continue
+
+        # AngleAngleTorsion Coeffs
+        for line in _params_file.content[angleangletorsion_index + 1:bondbond13_index]:
+
+            try:
+                if line[0].isalpha():
+                    typ, *params = tuple(line.split())
+                    params_nums = []
+
+                    # just takes strings into the right numeric types
+                    # if the str "1" becomes the float 1.0, LAMMPS may complain
+                    for param in params:
+                        try:
+                            if "." in param:
+                                param_num = float(param)
+                            else:
+                                param_num = int(param)
+                        except TypeError:
+                            raise TypeError("all AngleAngleTorsion parameters must be numbers, "
+                                            "at least one is not")
+                        except ValueError:  # if param=None
+                            param_num = None
+                        params_nums.append(param_num)
+
+                    DihedralType.instances_dict[typ].aat = params_nums  # list
+            except IndexError:
+                continue
+
+        # BondBond13 Coeffs
+        for line in _params_file.content[bondbond13_index + 1:angleangle_index]:
+
+            try:
+                if line[0].isalpha():
+                    typ, *params = tuple(line.split())
+                    params_nums = []
+
+                    # just takes strings into the right numeric types
+                    # if the str "1" becomes the float 1.0, LAMMPS may complain
+                    for param in params:
+                        try:
+                            if "." in param:
+                                param_num = float(param)
+                            else:
+                                param_num = int(param)
+                        except TypeError:
+                            raise TypeError("all BondBond13 parameters must be numbers, "
+                                            "at least one is not")
+                        except ValueError:  # if param=None
+                            param_num = None
+                        params_nums.append(param_num)
+
+                    DihedralType.instances_dict[typ].bb13 = params_nums  # list
+            except IndexError:
+                continue
+
+        # AngleAngle Coeffs
+        for line in _params_file.content[angleangle_index + 1:]:
+
+            try:
+                if line[0].isalpha():
+                    typ, *params = tuple(line.split())
+                    params_nums = []
+
+                    # just takes strings into the right numeric types
+                    # if the str "1" becomes the float 1.0, LAMMPS may complain
+                    for param in params:
+                        try:
+                            if "." in param:
+                                param_num = float(param)
+                            else:
+                                param_num = int(param)
+                        except TypeError:
+                            raise TypeError("all AngleAngle Coeffs must be numbers, "
+                                            "at least one is not")
+                        except ValueError:  # if param=None
+                            param_num = None
+                        params_nums.append(param_num)
+
+                    ImproperType.instances_dict[typ].aa = params_nums  # list
+            except IndexError:
+                continue
+
+        if not bondbond_index:
+            # moves charge from AtomType to each Atom
+            self._set_charges()
+        # else: this is compass and we use charge increments
 
         # re-indexes types leaving extra types (in .par but not in .xyz) behind
         self.atoms.re_index_types()
@@ -540,16 +808,20 @@ class LmpDat(File):
             atoms, bonds, angles, dihedrals, impropers = True, False, False, False, False
             molecule, charge = False, True
             parameters = False
-        elif atom_style == 'bond':
-            atoms, bonds, angles, dihedrals, impropers = True, True, False, False, False
-            molecule, charge = True, False
-            parameters = False
         else:  # to be expanded as needed
             raise TypeError("bad atom_style")
+
+        cross_terms = False
+        for angle_type in self.atoms.angle_types:
+            if angle_type.bb or angle_type.ba:
+                cross_terms = True
 
         number_of_dihedrals = len(self.atoms.dihedrals)
         if self._multiple_dihedrals:
             number_of_dihedrals = self.multiply_dihedral_coeffs()
+
+        # in case there is more than one Atoms object instantiated
+        self.atoms.re_index_types()
 
         with open(filename, "w") as F:
 
@@ -594,37 +866,33 @@ class LmpDat(File):
             # STRUCTURES
 
             if atoms and self.atoms.atoms:
-                molecule_flag = False
+                molecule_index = 0
                 F.write("\nAtoms \n\n")
-                if molecule and charge:
+                if molecule and charge:  # atom_style == "full"
                     for atom in self.atoms.atoms:
-                        if atom.molecule.index is None:
-                            atom.molecule.index = 1
-                            molecule_flag = True
-                        F.write(str(atom.index) + " " + str(atom.molecule.index) + " " + str(atom.type.index) +
+                        if atom.molecule is None:
+                            molecule_index = 1
+                        elif atom.molecule.index is None:
+                            molecule_index = 1
+                        else:
+                            molecule_index = atom.molecule.index
+                        F.write(str(atom.index) + " " + str(molecule_index) + " " + str(atom.type.index) +
                                 " " + str(atom.charge) + " " + " ".join(str(pos) for pos in atom.position)
                                 + "  # " + str(atom.type) + "\n")
-                elif molecule:
-                    for atom in self.atoms.atoms:
-                        if atom.molecule.index is None:
-                            atom.molecule.index = 1
-                            molecule_flag = True
-                        F.write(str(atom.index) + " " + str(atom.molecule.index) + " " + str(atom.type.index) + " " +
-                                " ".join(str(pos) for pos in atom.position) + "  # " + str(atom.type) + "\n")
-                elif charge:
+                elif charge:  # atom_style == "charge"
                     for atom in self.atoms.atoms:
                         if atom.charge is None:
                             atom.charge = 0.0
                         F.write(str(atom.index) + " " + str(atom.type.index) +
                                 " " + str(atom.charge) + " " + " ".join(str(pos) for pos in atom.position)
                                 + "  # " + str(atom.type) + "\n")
-                else:
+                else:  # atom_style == "atomic"
                     for atom in self.atoms.atoms:
                         F.write(str(atom.index) + " " + str(atom.type.index) +
                                 " " + " ".join(str(pos) for pos in atom.position)
                                 + "  # " + str(atom.type) + "\n")
 
-                if molecule_flag:
+                if molecule_index == 1:
                     print("WARNING: single molecule assumed!")
 
             if bonds and self.atoms.bonds:
@@ -688,39 +956,95 @@ class LmpDat(File):
 
             # TYPES
 
+            non_found_types = []  # helps with debugging
+
             if parameters and atoms and self.atoms.atoms:
                 F.write("\nPair Coeffs \n\n")
                 for atom_type in self.atoms.atom_types:
-                    F.write(str(atom_type.index) + " " +
-                            " ".join(str(param) for param in atom_type.params) +
-                            "  # " + str(atom_type) + "\n")
+                    try:
+                        F.write(str(atom_type.index) + " " +
+                                " ".join(str(param) for param in atom_type.params) +
+                                "  # " + str(atom_type) + "\n")
+                    except TypeError:
+                        non_found_types.append(atom_type)
 
             if bonds and self.atoms.bonds:
                 F.write("\nBond Coeffs \n\n")
                 for bond_type in self.atoms.bond_types:
-                    F.write(str(bond_type.index) + " " +
-                            " ".join(str(param) for param in bond_type.params) +
-                            "  # " + str(bond_type) + "\n")
+                    try:
+                        F.write(str(bond_type.index) + " " +
+                                " ".join(str(param) for param in bond_type.params) +
+                                "  # " + str(bond_type) + "\n")
+                    except TypeError:
+                        non_found_types.append(bond_type)
 
             if angles and self.atoms.angles:
                 F.write("\nAngle Coeffs \n\n")
                 for angle_type in self.atoms.angle_types:
-                    F.write(str(angle_type.index) + " " +
-                            " ".join(str(param) for param in angle_type.params) +
-                            "  # " + str(angle_type) + "\n")
+                    try:
+                        F.write(str(angle_type.index) + " " +
+                                " ".join(str(param) for param in angle_type.params) +
+                                "  # " + str(angle_type) + "\n")
+                    except TypeError:
+                        non_found_types.append(angle_type)
+
+                if cross_terms:
+                    F.write("\nBondBond Coeffs \n\n")
+                    for angle_type in self.atoms.angle_types:
+                        F.write(str(angle_type.index) + " " +
+                                " ".join(str(param) for param in angle_type.bb) +
+                                "  # " + str(angle_type) + "\n")
+                    F.write("\nBondAngle Coeffs \n\n")
+                    for angle_type in self.atoms.angle_types:
+                        F.write(str(angle_type.index) + " " +
+                                " ".join(str(param) for param in angle_type.ba) +
+                                "  # " + str(angle_type) + "\n")
 
             if dihedrals and self.atoms.dihedrals:
                 F.write("\nDihedral Coeffs \n\n")
                 for dihedral_type in self.atoms.dihedral_types:
                     if not self._multiple_dihedrals:
-                        F.write(str(dihedral_type.index) + " " +
-                                " ".join(str(param) for param in dihedral_type.params) +
-                                "  # " + str(dihedral_type) + "\n")
+                        try:
+                            F.write(str(dihedral_type.index) + " " +
+                                    " ".join(str(param) for param in dihedral_type.params) +
+                                    "  # " + str(dihedral_type) + "\n")
+                        except TypeError:
+                            non_found_types.append(dihedral_type)
                     else:  # if self._multiple_dihedrals
                         for i in range(len(dihedral_type.index)):
-                            F.write(str(dihedral_type.index[i]) + " " +
-                                    " ".join(str(param) for param in dihedral_type.params[i]) +
-                                    "  # " + str(dihedral_type) + "\n")
+                            try:
+                                F.write(str(dihedral_type.index[i]) + " " +
+                                        " ".join(str(param) for param in dihedral_type.params[i]) +
+                                        "  # " + str(dihedral_type) + "\n")
+                            except TypeError:
+                                non_found_types.append(dihedral_type)
+
+                if cross_terms:
+                    F.write("\nMiddleBondTorsion Coeffs \n\n")
+                    for dihedral_type in self.atoms.dihedral_types:
+                        F.write(str(dihedral_type.index) + " " +
+                                " ".join(str(param) for param in dihedral_type.mbt) +
+                                "  # " + str(dihedral_type) + "\n")
+                    F.write("\nEndBondTorsion Coeffs \n\n")
+                    for dihedral_type in self.atoms.dihedral_types:
+                        F.write(str(dihedral_type.index) + " " +
+                                " ".join(str(param) for param in dihedral_type.ebt) +
+                                "  # " + str(dihedral_type) + "\n")
+                    F.write("\nAngleTorsion Coeffs \n\n")
+                    for dihedral_type in self.atoms.dihedral_types:
+                        F.write(str(dihedral_type.index) + " " +
+                                " ".join(str(param) for param in dihedral_type.at) +
+                                "  # " + str(dihedral_type) + "\n")
+                    F.write("\nAngleAngleTorsion Coeffs \n\n")
+                    for dihedral_type in self.atoms.dihedral_types:
+                        F.write(str(dihedral_type.index) + " " +
+                                " ".join(str(param) for param in dihedral_type.aat) +
+                                "  # " + str(dihedral_type) + "\n")
+                    F.write("\nBondBond13 Coeffs \n\n")
+                    for dihedral_type in self.atoms.dihedral_types:
+                        F.write(str(dihedral_type.index) + " " +
+                                " ".join(str(param) for param in dihedral_type.bb13) +
+                                "  # " + str(dihedral_type) + "\n")
 
             if impropers and self.atoms.impropers:
                 F.write("\nImproper Coeffs \n\n")
@@ -732,6 +1056,19 @@ class LmpDat(File):
                     except TypeError:
                         print("WARNING: improper {} without parameters!".format(
                             str(improper_type)))
+
+                if cross_terms:
+                    F.write("\nAngleAngle Coeffs \n\n")
+                    for improper_type in self.atoms.improper_types:
+                        F.write(str(improper_type.index) + " " +
+                                " ".join(str(param) for param in improper_type.aa) +
+                                "  # " + str(improper_type) + "\n")
+
+            if non_found_types:
+                print("Topological types not found:")
+                for typ in non_found_types:
+                    print(typ)
+                raise TypeError("see above")
 
 
 class LmpOut(File):
@@ -830,7 +1167,6 @@ class LmpOut(File):
 
 class Cfg(File):
     """Class for LAMMPS cfg files."""
-
     # usual line: "mass type x y z *etc" where len(x,y,z,*etc) == entry_count
 
     def __init__(self, absolute_path=None,
@@ -975,7 +1311,7 @@ class Rdf(File):
                 n, r, *g_coord = line_tuple  # n is not used
                 rs.append(float(r))
                 for i in range(0, number_of_pairs * 2, 2):
-                    gs[int(i / 2)].append(g_coord[i])
+                    gs[int(i/2)].append(g_coord[i])
                     coords[int(i / 2)].append(g_coord[i + 1])
 
             else:  # not enough values to unpack

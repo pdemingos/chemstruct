@@ -1,6 +1,5 @@
-# Copyright 2019 Pedro G. Demingos
-
 """Basic functions and class for files."""
+
 
 import os
 
@@ -52,6 +51,42 @@ def find_between(line: str, char1: str, char2: str, nth_time=1):
         else:
             this_time += 1
             between = ""
+
+
+def break_at_whitespaces(line: str):
+    # do NOT use this
+    # use str.split() then tuple() instead
+    """
+    Breaks given string at whitespaces (" ", "\t", "\n").
+    Returns tuple of substrings.
+
+    Parameters
+    ----------
+    line : str
+        String to be broken.
+
+    Returns
+    -------
+    broken : tuple
+        All substrings (in order) broken from the given line.
+
+    """
+
+    whitespaces = [" ", "\t", "\n"]  # etc
+    broken = []
+    next_term = ""
+
+    for char in line:
+        if char not in whitespaces:
+            next_term += char
+        elif next_term != "":
+            broken.append(next_term)
+            next_term = ""
+    if next_term != "":
+        broken.append(next_term)
+
+    broken = tuple(broken)
+    return broken
 
 
 def clear_end(line: str, chars: list):
@@ -213,3 +248,28 @@ class File:
         with open(filename, "w") as F:
             for line in self.content:
                 F.write(line)
+
+    def compute_pars(self, par_dict: dict):
+        """If File has content in the form "KEY = VALUE", this method can be
+         used to update the given par_dict with the VALUES, as long as the KEYS
+         match. Returns updated par_dict. Iterables must have "," as separator,
+         and will be cast to tuple."""
+
+        for line in self._content:
+            if "=" in line:
+                split = line.split("=")
+                if len(split) == 2:
+                    key, value = tuple(split)
+                    key = key.replace(" ", "")
+                    value = value.replace(" ", "")
+
+                    try:  # casts new values to the type of their std value
+                        original_value_type = type(par_dict[key])
+                        if original_value_type == tuple:
+                            inner_type = type(value[0])
+                            value = [inner_type(v) for v in value.split(",")]
+                        par_dict[key] = original_value_type(value)
+                    except KeyError:
+                        raise KeyError("bad key in File: {}".format(key))
+
+        return par_dict

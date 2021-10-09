@@ -12,7 +12,7 @@ from files.main import File
 from files.xyz import Xyz
 from atoms import AtomType, BondType, AngleType, DihedralType, ImproperType
 from glob import glob
-from constants import PACKAGE_DIR, BOND_LENGTHS
+from constants import PACKAGE_DIR
 
 FROM_CLASSIFICATION_TO_CGEN = {
 
@@ -458,43 +458,26 @@ FROM_CLASSIFICATION_TO_GAFF = {
     # "Ne": ""
 }
 
-FROM_HYBRYDIZATION_AND_TYPE_TO_DFF = {
-    "Hother": "H_",
-    # TODO: H___HB and H__B
-    "Bsp3": "B_3",
-    "Bsp2": "B_2",
-    "Csp3": "C_3",
-    "Csp2": "C_2",
-    # TODO: "C_R",
-    "Csp": "C_1",
-    "Nsp3": "N_3",
-    "Nsp2": "N_2",
-    # TODO: "N_R",
-    "Nsp": "N_1",
-    "Osp3": "O_3",
-    "Osp2": "O_2",
-    # TODO: "O_R",
-    "Osp": "O_1",
-    "Fsp3": "F_",
-    "Alsp3": "Al3",
-    "Sisp3": "Si3",
-    "Psp3": "P_3",
-    "Ssp3": "S_3",
-    "Clsp3": "Cl",
-    "Gasp3": "Ga3",
-    "Gesp3": "Ge3",
-    "Assp3": "As3",
-    "Sesp3": "Se3",
-    "Brsp3": "Br",
-    "Insp3": "In3",
-    "Snsp3": "Sn3",
-    "Sbsp3": "Sb3",
-    "Tesp3": "Te3",
-    "Isp3": "I_",
-    "Nasp3": "Na",
-    "Casp3": "Ca",
-    "Fesp3": "Fe",
-    "Znsp3": "Zn"
+FROM_CLASSIFICATION_TO_COMPASS = {
+
+    # PDMS
+    "sp3 CH3 H": "h1",
+    "CH3 sp3 C": "c4",
+    "SiO O": "o2",
+    "Si": "si4c",
+
+    # GO
+    "conjugated CHR sp2 C": "c3a",
+    "conjugated CRR' sp2 C": "c3a",
+    "6-ring aromatic C": "c3a",
+    "hydroxyl C": "c44",
+    "ether C": "c44",
+    "6-ring aromatic H": "h1",
+    "sp2 CHR H": "h1",
+    "hydroxyl H": "ho2",
+    "ether O": "o_2",
+    "hydroxyl O": "o_2"
+
 }
 
 
@@ -648,10 +631,6 @@ class ForceField(File):
                         F.write("\t".join([str(atom_type), str(atom_type.charge),
                                            str(atom_type.epsilon), str(atom_type.sigma),
                                            str(atom_type.epsilon14), str(atom_type.sigma14)]) + "\n")
-            # elif "dpd" in self.tags:
-            #     F.write("# type\tA\tgamma\n")
-            #     for atom_type in self.atoms.atom_types:
-            #         F.write("\t".join([str(atom_type), str(atom_type.A), str(atom_type.gamma) + "\n"]))
             else:
                 F.write("# type\tcharge\tepsilon\tsigma\n")
                 for atom_type in self.atoms.atom_types:
@@ -1470,412 +1449,519 @@ class GeneralAmber(ForceField):
             atom_type.sigma = round(float(r_min_over2) * 2 * r_min_to_sigma, 5)
 
 
-class Dreiding(ForceField):
+class Compass(ForceField):
     """"""
 
     def __init__(self, xyz_file=None):
         super().__init__(xyz_file=xyz_file)
-        self.tags.add("dreiding")
+        self.tags.add("compass")
+        self.par_file = PACKAGE_DIR + "/compass.prm"
+        # TODO if I ever come back to compass, I must use Moltemplate pars
 
     def compute_topology(self, periodic="", simple=False):
-        """"""
-        if self.atoms is None:
-            raise NameError("No atoms")
+
         self.atoms.compute_topology(periodic=periodic, complete=True,
                                     hold_pool_top_types=True,
                                     simple=simple)
-        # Take Hydrogens out
-        self.hydrogen_adjust()
 
-        # first round, classification to types
         for atom in self.atoms.atoms:
             try:
-                ### Ver de mudar para Atom.classification
-                atom.type = FROM_HYBRYDIZATION_AND_TYPE_TO_DFF[atom.type.real + atom.hybridization] + str(
-                    atom.connected_hydrogens)
-                atom.tags.add("ff class done")
+                # print(atom.classification)
+                atom.type = FROM_CLASSIFICATION_TO_COMPASS[atom.classification]
             except KeyError:
-                continue
+                print("WARNING: bad classification for COMPASS: '{}' with [{}]".format(
+                    atom.classification, " ".join(list(atom.topological_tags))))
 
         # pools
         self.atoms.pool_topological_types(re_compute_types=True)
         self.get_params()
 
-        # self.check_water_angles()  # bugs if molecules are periodic!
-        # do we use tip3p here or what?
-
     def get_params(self):
-        """Goes through the parameters file, assigning parameter
-        values to previously computed topological structures."""
+
         self.absolute_path = self.par_file
         self.read_file()
 
         # finds keywords
+        atoms_index, bonds_index, angles_index = None, None, None
+        dihedrals_index, impropers_index, nonbonded_index = None, None, None
+        bondbond_index, bondangle_index, angleangle_index = None, None, None
+        endbondtorsion_index, middlebondtorsion_index = None, None
+        angletorsion_index, angleangletorsion_index = None, None
+        for (index, line) in enumerate(self.content):
+            if line.startswith("ATOM TYPES"):
+                atoms_index = index
+            elif line.startswith("NONBONDED"):
+                nonbonded_index = index
+            elif line.startswith("BONDS"):
+                bonds_index = index
+            elif line.startswith("ANGLES"):
+                angles_index = index
+            elif line.startswith("TORSION"):
+                dihedrals_index = index
+            elif line.startswith("OUT OF PLANE"):
+                impropers_index = index
+            elif line.startswith("BOND BOND"):
+                bondbond_index = index
+            elif line.startswith("BOND ANGLE"):
+                bondangle_index = index
+            elif line.startswith("ANGLE ANGLE"):
+                angleangle_index = index
+            elif line.startswith("END BOND TORSION"):
+                endbondtorsion_index = index
+            elif line.startswith("MIDDLE BOND TORSION"):
+                middlebondtorsion_index = index
+            elif line.startswith("ANGLE TORSION"):
+                angletorsion_index = index
+            elif line.startswith("ANGLE ANGLE TORSION"):
+                angleangletorsion_index = index
+            else:
+                continue
+
         # below, looks for Topological Types that exist in self.atoms
         # and edits their properties based on the parameters file
 
-        # reads ATOMS parameters
-        Mass = dict(H_="1.00797", B_3="10.811", B_2="10.811", C_3="12.01100", C_2="12.01100", C_1="12.01100",
-                    N_3="14.00700", N_2="14.00700", N_1="14.00700", O_3="15.99940", O_2="15.99940", O_1="15.99940",
-                    F_="18.99800", Al3="26.981539", Si3="28.0855", P_3="30.97376", S_3="32.06", Cl="35.453",
-                    Ga3="69.72", Ge3="72.59", As3="74.9216", Se3="78.96", Br="79.904", In3="114.82", Sn3="118.69",
-                    Sb3="121.75", Te3="127.60", I_="126.9045", Na="22.98977", Ca="40.08", Fe="55.847", Zn="65.38")
+        # reads NONBONDED parameters
+        for line in self.content[nonbonded_index:]:
 
-        R0 = {"H": 3.195, "H_b": 3.195, "H_HB": 3.195, "B": 4.02, "C": 3.8983, "N": 3.6621, "O": 3.4046, "F": 3.4720,
-              "Al": 4.39, "Si": 4.27, "P": 4.1500, "S": 4.0300, "Cl": 3.9503, "Ga": 4.39, "Gc": 4.27, "As": 4.15,
-              "Sc": 4.03, "Br": 3.95, "In": 4.59, "Sn": 4.47, "Sb": 4.35, "Tc": 4.23, "I": 4.15, "Nu": 3.144,
-              "Ca": 3.472, "Fe": 4.54, "Zn": 4.54, "C_R1": 4.23, "C_34": 4.2370, "C_33": 4.1524, "C_32": 4.0677,
-              "C_31": 3.9830}
-        D0 = {"H": 0.0152, "H_b": 0.0152, "H_HB": 0.0001, "B": 0.095, "C": 0.0951, "N": 0.0774, "O": 0.0957,
-              "F": 0.0725, "Al": 0.31, "Si": 0.31, "P": 0.3200, "S": 0.3440, "Cl": 0.2833, "Ga": 0.40, "Gc": 0.40,
-              "As": 0.41, "Sc": 0.43, "Br": 0.37, "In": 0.55, "Sn": 0.55, "Sb": 0.55, "Tc": 0.57, "I": 0.51, "Nu": 0.5,
-              "Cu": 0.05, "Fc": 0.055, "Zn": 0.055, "C_R1": 0.1356, "C_34": 0.3016, "C_33": 0.2500,
-              "C_32": 0.1984, "C_31": 0.1467}
+            if line.startswith("END OF SECTION"):
+                break
 
-        for atom in AtomType.instances_dict.keys():
             try:
-                AtomType.instances_dict[atom].mass = float(Mass[atom[:-1]])
-                AtomType.instances_dict[atom[:]].epsilon = float(D0[atom]) / 4
-                AtomType.instances_dict[atom].sigma = float(R0[atom])
-            except KeyError:
-                # Adjust for all atoms
+                atom, r0, e0, *equivalence = tuple(line.split())
+            except ValueError:
                 continue
-        # reads BONDS parameters -  bond_style harmonic
-        AtomSaturation = dict(H_="Single", B_3="Single?", B_2="Double?", C_3="Single", C_2="Double", C_1="Triple",
-                              N_3="Single", N_2="Double", N_1="Triple", O_3="Single", O_2="Double", O_1="Triple",
-                              F_="Single", Al3="Single", Si3="Single", P_3="Single", S_3="Single", Cl="Single",
-                              Ga3="Single", Ge3="Single", As3="Single", Se3="Single", Br="Single", In3="Single",
-                              Sn3="Single", Sb3="Single", Te3="Single", I_="Single", Na="Single", Ca="Single",
-                              Fe="Single", Zn="Single")
-        AtomDistance = dict(H_=0.330, B_3=0.510, B_2=0.880, C_3=0.770, C_2=0.670, C_1=0.602, N_3=0.702, N_2=0.615,
-                            N_1=0.556, O_3=0.660, O_2=0.560, O_1=0.528, F_=0.611, Al3=1.047, Si3=0.937, P_3=0.890,
-                            S_3=1.040, Cl=0.997, Ga3=1.210, Ge3=1.210, As3=1.210, Se3=1.210, Br=1.167, In3=1.390,
-                            Sn3=1.373, Sb3=1.432, Te3=1.280, I_=1.360, Na=1.860, Ca=1.940, Fe=1.285, Zn=1.330)
-        for bond in BondType.instances_dict.keys():
-            atom1, atom2 = tuple([atom[:-1] for atom in bond.split(":")])
+
             try:
-                if {AtomSaturation[atom1], AtomSaturation[atom2]}.issuperset({"Single"}):
-                    try:
-                        BondType.instances_dict[bond].k = 350.0
-                        BondType.instances_dict[bond].r0 = AtomDistance[atom1] + AtomDistance[atom2] - 0.01
-                        BondType.instances_dict[bond].bond_order = 1
-                    except KeyError:
-                        continue
-                elif {AtomSaturation[atom1], AtomSaturation[atom2]}.issuperset({"Double"}):
-                    try:
-                        BondType.instances_dict[bond].k = 700.0
-                        BondType.instances_dict[bond].r = AtomDistance[atom1] + AtomDistance[atom2] - 0.01
-                        BondType.instances_dict[bond].bond_order = 2
-                    except KeyError:
-                        continue
-                else:
-                    try:
-                        BondType.instances_dict[bond].k = 1050.0
-                        BondType.instances_dict[bond].r = AtomDistance[atom1] + AtomDistance[atom2] - 0.01
-                        BondType.instances_dict[bond].bond_order = 3
-                    except KeyError:
-                        continue
+                atom_type = AtomType.instances_dict[atom]
             except KeyError:
                 continue
 
-        # reads ANGLES parameters
-        AtomAngles = dict(H_=180.0, B_3=109.471, B_2=120.0, C_3=109.471, C_2=120.0, C_1=180.0, N_3=106.7, N_2=120.0,
-                          N_1=180.0, O_3=104.51, O_2=120.0, O_1=180.0, F_=180.0, Al3=109.471, Si3=109.471, P_3=93.3,
-                          S_3=92.1, Cl=180.0, Ga3=109.471, Ge3=109.471, As3=92.1, Se3=90.6, Br=180.0, In3=109.471,
-                          Sn3=109.471, Sb3=91.6, Te3=90.3, I_=180.0, Na=90.0, Ca=90.0, Fe=90.0, Zn=109.471)
-        for angle in AngleType.instances_dict.keys():
-            atom1, atom2, atom3 = tuple([atom[:-1] for atom in angle.split(":")])
+            atom_type.epsilon = float(e0)
+            atom_type.sigma = float(r0)
+
+        # reads BONDS parameters
+        for line in self.content[bonds_index:]:
+
+            if line.startswith("END OF SECTION"):
+                break
+
             try:
-                AngleType.instances_dict[angle].k = 50.0
-                AngleType.instances_dict[angle].theta0 = float(AtomAngles[atom2])
+                atom1, atom2, b0, k2, k3, k4, increment = tuple(line.split())
+            except ValueError:
+                continue
+
+            #if atom1 > atom2:
+            #    atom1, atom2 = atom2, atom1
+            bond = atom1 + ":" + atom2
+            try:
+                bond_type = BondType.instances_dict[bond]
             except KeyError:
-                continue
-
-        # reads DIHEDRALS parameters
-        # Lammps say dihedral charmm should be used, but the equations from
-        # dreiding ff and lammps difer slightly so the paremeters obtained from
-        # the ff are changed accordingly.
-        # The fact that in lammps is 1+cos and in dreiding is 1+cos is ignored.
-        for dihedral in DihedralType.instances_dict.keys():
-            atom1, atom2, atom3, atom4 = tuple([atom[:-1] for atom in dihedral.split(":")])
-            try:
-                # a) A dihedral single bond involving two sp3 atoms (J,K = X_3)
-                if {atom2[-1], atom3[-1]} == {"3"}:
-                    DihedralType.instances_dict[dihedral].k = [float(1.0)]
-                    DihedralType.instances_dict[dihedral].n = [int(3)]
-                    DihedralType.instances_dict[dihedral].d = [int(180 * 3)]
-                # b) A dihedral single bond involving one sp2 center and one sp3
-                # center |e.g., the C-C bond in acetic acid [CH3C(0)^0H)]|:
-                # (J = X.2, X.R; K = X.3)
-                elif {atom2[-1], atom3[-1]} == {"2", "3"}:
-                    DihedralType.instances_dict[dihedral].k = [float(0.5)]
-                    DihedralType.instances_dict[dihedral].n = [int(6)]
-                    DihedralType.instances_dict[dihedral].d = [int(0)]
-                # c) A dihedral double bond involving two sp2 atoms (J,K = X.2)
-                elif {atom2[-1], atom3[-1]} == {"2"}:
-                    DihedralType.instances_dict[dihedral].k = [float(22.5)]
-                    DihedralType.instances_dict[dihedral].n = [int(2)]
-                    DihedralType.instances_dict[dihedral].d = [int(180 * 2)]
-                # # d)
-                # elif {atom2[-1], atom3[-1]}.issubset({"R", "2"}):
-                #     # d) A dihedral resonance bond(bond order = 1.5) involving two
-                #     # resonant atoms(J, K=X.R)
-                #     if {atom1[-1], atom3[-1]} == {"R"} and not {atom1[-1], atom4[-1]} == {"R"}:
-                #         DihedralType.instances_dict[dihedral].k = 0.5
-                #         DihedralType.instances_dict[dihedral].n = 6
-                #         DihedralType.instances_dict[dihedral].d = 0
-            except:
-                continue
-        # reads IMPROPERS parameters
-        for improper in ImproperType.instances_dict.keys():
-            # the first atom is the central
-            atom1, atom2, atom3, atom4 = tuple([atom[:-1] for atom in dihedral.split(":")])
-            if atom1[-2:] == "_2" or atom1[-2:] == "_R":
-                try:
-                    ImproperType.instances_dict[improper].k = 40.0
-                    ImproperType.instances_dict[improper].x0 = 0
-                except KeyError:
-                    continue
-            # ex: NH3 and PH3  (In the way the code is written, a correspondence will not appear)
-            elif atom1[-2:] == "_3":
-                try:
-                    ImproperType.instances_dict[improper].k = 0
-                except KeyError:
-                    continue
-            # C alpha Aminoacid (In the way the code is written, a correspondence will not appear)
-            elif atom1[-3:] == "_31":
-                try:
-                    ImproperType.instances_dict[improper].k = 40.0
-                    ImproperType.instances_dict[improper].x0 = 0
-                except KeyError:
-                    continue
-
-    def hydrogen_adjust(self):
-        """
-        Suppress the H that are present.
-        Adjust the respective atoms that it was bonded to.
-        """
-
-        # Usado H_took_off pq estava retirando da lista que esta se iterando sobre
-
-        for number, atom in enumerate(self.atoms.atoms):
-            if str(atom)[0] == "H":
-                for bond in atom.bonds:
-                    for bonded_atom in bond.atoms:
-                        if bonded_atom != atom:
-                            bonded_atom.connected_hydrogens += 1
-                    self.atoms.remove_bond(bond)
-
-        # Deve ter uma maneira mais bonita de se fazer ao invés de usar H_took__off
-        H_took_off = 0
-        for number in range(len(self.atoms.angles)):
-            angle = self.atoms.angles[number - H_took_off]
-            if "H" in [str(n)[0] for n in angle.atoms]:
-                self.atoms.remove_angle(angle)
-                H_took_off += 1
-
-        # Deve ter uma maneira mais bonita de se fazer ao invés de usar H_took__off
-        H_took_off = 0
-        for number in range(len(self.atoms.dihedrals)):
-            dihedral = self.atoms.dihedrals[number - H_took_off]
-            if "H" in [str(n)[0] for n in dihedral.atoms]:
-                self.atoms.remove_dihedral(dihedral)
-                H_took_off += 1
-
-        # Deve ter uma maneira mais bonita de se fazer ao invés de usar H_took__off
-        H_took_off = 0
-        for number in range(len(self.atoms.impropers)):
-            improper = self.atoms.impropers[number - H_took_off]
-            if "H" in [str(n)[0] for n in improper.atoms]:
-                self.atoms.remove_improper(improper)
-                H_took_off += 1
-
-        # Deve ter uma maneira mais bonita de se fazer ao invés de usar H_took__off
-        H_took_off = 0
-        for number in range(len(self.atoms.atoms)):
-            atom = self.atoms.atoms[number - H_took_off]
-            if str(atom)[0] == "H":
-                self.atoms.remove_atom(atom)
-                H_took_off += 1
-
-    # def bond_adjust(self):
-    #     """Adjust bond about its saturation.
-    #
-    #     Now it only has for C, TODO other atoms
-    #     """
-    #
-    #     for bond in self.atoms.bonds:
-    #         for atom in bond.atoms:
-    #             bonded_atom = [a for a in bond.atoms if a != atom][0]
-    #             if str(atom)[:2] == "C_":
-    #                 if atom.hybridization == "sp2":
-    #                     if bonded_atom.hybridization == "sp2":
-    #                         pass
-    #                     else:
-    #                         break
-
-
-class DPD(ForceField):
-    def __init__(self, coef_file: str, xyz_file=None):
-        super().__init__(xyz_file=xyz_file)
-        self.coef_file = coef_file
-        self.bonded_atoms = dict()
-        self.bonded_atoms_coeffs = dict()
-        self.pair_atoms_coeffs = dict()
-        self.dpd_coeff()
-        self.tags.add("dpd")
-
-    def compute_topology(self, periodic="", simple=False):
-        """"""
-        if self.atoms is None:
-            raise NameError("No atoms")
-        # print(self.atoms.atoms)
-        self.atoms.compute_topology(periodic=periodic, complete=True,
-                                    hold_pool_top_types=True,
-                                    simple=simple, other=False)
-
-        self.atoms.pool_topological_types(re_compute_types=True)
-        self.get_params()
-
-    def get_params(self):
-        """Goes through the parameters file, assigning parameter
-        values to previously computed topological structures."""
-
-        for key in self.bonded_atoms.keys():
-            bond_list = self.bonded_atoms[key]
-            for bond in bond_list:
-                try:
+                try:  # redundant
                     bond_type = BondType.instances_dict[bond]
                 except KeyError:
                     continue
 
-                bond_type.k = self.bonded_atoms_coeffs[key][0]
-                bond_type.r0 = self.bonded_atoms_coeffs[key][1]
+            bond_type.r0 = float(b0)
+            bond_type.k = float(k2)
+            bond_type.k3 = float(k3)
+            bond_type.k4 = float(k4)
+            bond_type.increment = float(increment)
+            bond_type.first_atom = atom1
 
-        # finds keywords
-        # atoms_index, bonds_index, pair_coeffs_index, bond_coeffs_index = None, None, None, None
-        #
-        # for (index, line) in enumerate(self.content):
-        #     if line.upper().startswith("ATOMS"):
-        #         atoms_index = index
-        #     elif line.startswith("BONDS"):
-        #         bonds_index = index
-        #     elif line.startswith("PAIR COEFFS"):
-        #         pair_coeffs_index = index
-        #     elif line.startswith("BOND COEFFS"):
-        #         bond_coeffs_index = index
-        #     else:
-        #         continue
-        #
-        # assert bonds_index > atoms_index
-        # assert pair_coeffs_index > bonds_index
-        # assert bond_coeffs_index > pair_coeffs_index
+        # reads ANGLES parameters
+        for line in self.content[angles_index:]:
 
-        # below, looks for Topological Types that exist in self.atoms
-        # and edits their properties based on the parameters file
+            if line.startswith("END OF SECTION"):
+                break
 
-        # for line in self.content[atoms_index:bonds_index]:
-        #     try:
-        #         pass
-        #     except:
-        #         continue
-        #
-        # for line in self.content[bonds_index:pair_coeffs_index]:
-        #     try:
-        #         pass
-        #     except:
-        #         continue
-        #
-        #
-        # for line in self.content[pair_coeffs_index:bond_coeffs_index]:
-        #     if line.lower().startswith("pair_coeff"):
-        #         try:
-        #             pass
-        #         except:
-        #             continue
-        #         # try:
-        #         #     _, atom1, atom2, A, mi, *comment = tuple(line.split())
-        #         # except:
-        #         #     continue
-        #         #
-        #         # try:
-        #         #     atom_type = AtomType.instances_dict[atom]
-        #         # except KeyError:
-        #         #     continue
-        #         #
-        #         # atom_type.A = float(A)
-        #         # atom_type.mi = float(mi)
-        #
-        #
-        # for line in self.content[bond_coeffs_index:]:
-
-    def dpd_coeff(self):
-        """Get the special bonds from the provided coefficients file"""
-
-        self.absolute_path = self.coef_file
-        self.read_file()
-
-        atoms_index, bonds_index, pair_coeffs_index, bond_coeffs_index = None, None, None, None
-
-        for (index, line) in enumerate(self.content):
-            if line.upper().startswith("ATOMS"):
-                atoms_index = index
-            elif line.upper().startswith("BONDS"):
-                bonds_index = index
-            elif line.upper().startswith("PAIR COEFFS"):
-                pair_coeffs_index = index
-            elif line.upper().startswith("BOND COEFFS"):
-                bond_coeffs_index = index
-            else:
-                continue
-
-        assert bonds_index > atoms_index
-        assert pair_coeffs_index > bonds_index
-        assert bond_coeffs_index > pair_coeffs_index
-
-        for line in self.content[bonds_index:pair_coeffs_index]:
             try:
-                bond_number, atom1, atom2, *comment = tuple(line.split())
-                float(bond_number)
-            except:
+                atom1, atom2, atom3, q0, k2, k3, k4 = tuple(line.split())
+            except ValueError:
                 continue
-            else:
-                bond12 = atom1 + ":" + atom2
-                bond21 = atom2 + ":" + atom1
-                if bond_number in self.bonded_atoms.keys():
-                    self.bonded_atoms[bond_number].extend([bond12, bond21])
-                else:
-                    self.bonded_atoms[bond_number] = [bond12, bond21]
 
-        for line in self.content[pair_coeffs_index:bond_coeffs_index]:
-            if line.startswith('pair_coeff'):
-                try:
-                    _, atom1, atom2, A, gamma, *etc = tuple(line.split())
-                except:
+            if atom1 > atom3:
+                atom1, atom3 = atom3, atom1
+
+            angle = atom1 + ":" + atom2 + ":" + atom3
+            try:
+                angle_type = AngleType.instances_dict[angle]
+            except KeyError:
+                try:  # redundant
+                    angle_type = AngleType.instances_dict[angle]
+                except KeyError:
                     continue
-                else:
-                    self.pair_atoms_coeffs[atom1, ":", atom2] = float(A), float(gamma)
 
-        for line in self.content[bond_coeffs_index:]:
+            angle_type.theta0 = float(q0)
+            angle_type.k = float(k2)
+            angle_type.k3 = float(k3)
+            angle_type.k4 = float(k4)
+
+            bond1_type = BondType.instances_dict[atom1 + ":" + atom2]
+            angle_type.r1 = bond1_type.r0
+            bond2_type = BondType.instances_dict[atom2 + ":" + atom3]
+            angle_type.r2 = bond2_type.r0
+
+        # reads DIHEDRALS parameters
+        for line in self.content[dihedrals_index:]:
+
+            if line.startswith("END OF SECTION"):
+                break
+
             try:
-                _, bond_number, k, r0, *etc = tuple(line.split())
-            except:
+                atom1, atom2, atom3, atom4, k1, k2, k3 = tuple(line.split())
+            except ValueError:
                 continue
-            else:
-                self.bonded_atoms_coeffs[bond_number] = float(k), float(r0)
 
-        # Give a 10% Headroom for the bond
-        for key in self.bonded_atoms.keys():
-            for bond in self.bonded_atoms[key]:
-                BOND_LENGTHS[bond] = self.bonded_atoms_coeffs[key][1] * 1.1
+            if atom1 > atom4:
+                atom1, atom2, atom3, atom4 = atom4, atom3, atom2, atom1
+            elif (atom1 == atom4) and (atom2 > atom3):
+                atom1, atom2, atom3, atom4 = atom4, atom3, atom2, atom1
 
-    def lmp_complement(self, filename):
-        """Add the PairIJ Coeff Segment in the .lmp file"""
-        with open(filename, "a+") as F:
-            F.write("\nPairIJ Coeffs \n\n")
-            for atom_I_number, atom_I_type in enumerate(self.atoms.atom_types):
-                for atom_J_number, atom_J_type in enumerate(self.atoms.atom_types[atom_I_number:]):
-                    F.write(str(atom_I_type.index) + " " + str(atom_J_type.index) + " " +
-                            " ".join(str(param) for param in
-                                     self.pair_atoms_coeffs[str(atom_I_type), ":", str(atom_J_type)]) +
-                            "  # " + str(atom_I_type) + ":" + str(atom_J_type) + "\n")
+            dihedral = atom1 + ":" + atom2 + ":" + atom3 + ":" + atom4
+            try:
+                dihedral_type = DihedralType.instances_dict[dihedral]
+            except KeyError:
+                try:  # redundant
+                    dihedral_type = DihedralType.instances_dict[dihedral]
+                except KeyError:
+                    continue
+
+            dihedral_type.k = float(k1)
+            dihedral_type.k2 = float(k2)
+            dihedral_type.k3 = float(k3)
+
+            bond1_type = BondType.instances_dict[atom1 + ":" + atom2]
+            dihedral_type.r1 = bond1_type.r0
+            bond2_type = BondType.instances_dict[atom2 + ":" + atom3]
+            dihedral_type.r2 = bond2_type.r0
+            bond3_type = BondType.instances_dict[atom3 + ":" + atom4]
+            dihedral_type.r3 = bond3_type.r0
+            angle1_type = AngleType.instances_dict[atom1 + ":" + atom2 + ":" + atom3]
+            dihedral_type.theta1 = angle1_type.theta0
+            angle2_type = AngleType.instances_dict[atom2 + ":" + atom3 + ":" + atom4]
+            dihedral_type.theta2 = angle2_type.theta0
+
+        # reads IMPROPERS parameters
+        for line in self.content[impropers_index:]:
+
+            if line.startswith("END OF SECTION"):
+                break
+
+            try:
+                atom1, atom2, atom3, atom4, k2 = tuple(line.split())
+            except ValueError:
+                continue
+
+            improper = atom2 + ":" + atom1 + ":" + atom3 + ":" + atom4
+            # the second atom is the central in COMPASS!
+            try:
+                improper_type = ImproperType.instances_dict[improper]
+            except KeyError:
+                continue
+
+            improper_type.k = float(k2)
+
+        # reads BOND BOND parameters
+        for line in self.content[bondbond_index:]:
+
+            if line.startswith("END OF SECTION"):
+                break
+
+            try:
+                i, j, k, ij_jk = tuple(line.split())
+            except ValueError:
+                continue
+
+            angle = i + ":" + j + ":" + k
+            try:
+                angle_type = AngleType.instances_dict[angle]
+            except KeyError:
+                continue
+
+            angle_type.ij_jk = float(ij_jk)
+
+        # reads BOND ANGLE parameters
+        for line in self.content[bondangle_index:]:
+
+            if line.startswith("END OF SECTION"):
+                break
+
+            try:
+                i, j, k, ij_ijk, jk_ijk = tuple(line.split())
+            except ValueError:
+                continue
+
+            angle = i + ":" + j + ":" + k
+            try:
+                angle_type = AngleType.instances_dict[angle]
+            except KeyError:
+                continue
+
+            angle_type.ij_ijk = float(ij_ijk)
+            angle_type.jk_ijk = float(jk_ijk)
+
+        # reads ANGLE ANGLE parameters
+        # (these go as Improper pars)
+        for line in self.content[angleangle_index:]:
+            # TODO this is wrong
+            #  and weird and I need to look this up if I ever need AngleAngle
+
+            if line.startswith("END OF SECTION"):
+                break
+
+            try:
+                i, j, k, l, ijk_jkl = tuple(line.split())
+                # there's actually 3 energy terms; see LAMMPS doc for this
+            except ValueError:
+                continue
+
+            improper = j + ":" + i + ":" + k + ":" + l
+            # the second atom is the central in COMPASS!
+            try:
+                improper_type = ImproperType.instances_dict[improper]
+            except KeyError:
+                continue
+
+            # improper_type.ijk_jkl = float(ijk_jkl)
+
+        # reads END BOND TORSION parameters
+        for line in self.content[endbondtorsion_index:]:
+
+            if line.startswith("END OF SECTION"):
+                break
+
+            try:
+                i, j, k, l, b1, b2, b3, c1, c2, c3 = tuple(line.split())
+            except ValueError:
+                continue
+
+            dihedral = i + ":" + j + ":" + k + ":" + l
+            try:
+                dihedral_type = DihedralType.instances_dict[dihedral]
+            except KeyError:
+                continue
+
+            dihedral_type.b1 = float(b1)
+            dihedral_type.b2 = float(b2)
+            dihedral_type.b3 = float(b3)
+            dihedral_type.c1 = float(c1)
+            dihedral_type.c2 = float(c2)
+            dihedral_type.c3 = float(c3)
+
+        # reads MIDDLE BOND TORSION parameters
+        for line in self.content[middlebondtorsion_index:angletorsion_index]:
+
+            if line.startswith("END OF SECTION"):
+                break
+
+            try:
+                i, j, k, l, a1, a2, a3 = tuple(line.split())
+            except ValueError:
+                continue
+
+            dihedral = i + ":" + j + ":" + k + ":" + l
+            try:
+                dihedral_type = DihedralType.instances_dict[dihedral]
+            except KeyError:
+                continue
+
+            dihedral_type.a1 = float(a1)
+            dihedral_type.a2 = float(a2)
+            dihedral_type.a3 = float(a3)
+
+        # reads ANGLE TORSION parameters
+        for line in self.content[angletorsion_index:angleangletorsion_index]:
+
+            if line.startswith("END OF SECTION"):
+                break
+
+            try:
+                i, j, k, l, d1, d2, d3, e1, e2, e3 = tuple(line.split())
+            except ValueError:
+                continue
+
+            dihedral = i + ":" + j + ":" + k + ":" + l
+            try:
+                dihedral_type = DihedralType.instances_dict[dihedral]
+            except KeyError:
+                continue
+
+            dihedral_type.d1 = float(d1)
+            dihedral_type.d2 = float(d2)
+            dihedral_type.d3 = float(d3)
+            dihedral_type.e1 = float(e1)
+            dihedral_type.e2 = float(e2)
+            dihedral_type.e3 = float(e3)
+
+        # reads ANGLE ANGLE TORSION parameters
+        for line in self.content[angleangletorsion_index:]:
+
+            if line.startswith("END OF SECTION"):
+                break
+
+            try:
+                i, j, k, l, ij_ijkl_jkl = tuple(line.split())
+            except ValueError:
+                continue
+
+            dihedral = i + ":" + j + ":" + k + ":" + l
+            try:
+                dihedral_type = DihedralType.instances_dict[dihedral]
+            except KeyError:
+                continue
+
+            dihedral_type.ij_ijkl_jkl = float(ij_ijkl_jkl)
+
+        # TODO:
+        # BondBond13 ???
+
+    def order_in_bonds(self):
+        for bond in self.atoms.bonds:
+            atom1, atom2 = tuple(bond.atoms)
+            if atom1.type != bond.type.first_atom:
+                bond.atoms = [atom2, atom1]
+        for bond_type in self.atoms.bond_types:
+            bond_type.class2_order()
+
+    def increment_charges(self):
+
+        for atom in self.atoms:
+            atom.charge = 0.0000
+
+        for bond in self.atoms.bonds:
+            bond_type = bond.type
+            increment = round(bond_type.increment, 4)
+            # print(bond_type, increment, bond_type.first_atom)
+            for atom in bond:
+                if str(atom.type) == str(bond_type.first_atom):
+                    # print("Adding to {}".format(atom.type))
+                    atom.charge += increment
+                else:
+                    # print("Taking from {}".format(atom.type))
+                    atom.charge -= increment
+
+        for atom in self.atoms:
+            atom.charge = round(atom.charge, 4)
+
+        # checks neutrality
+        total_charge = 0.0
+        for atom in self.atoms:
+            total_charge += atom.charge
+        print("System total charge = {}".format(total_charge))
+
+    def order_in_angles(self):
+        """Makes sure every angle has atoms ordered in alphabetical order
+        (using their COMPASS types). This ensures that r1 and r2 correspond
+        to the right bonds, in order, which is needed for class2 parameters."""
+        for angle in self.atoms.angles:
+            atom1, atom2, atom3 = tuple(angle.atoms)
+            if str(atom1.type) > str(atom3.type):
+                angle.atoms = [atom3, atom2, atom1]
+
+    def order_in_dihedrals(self):
+        """Same as order_in_angles, but for dihedrals."""
+        for dihedral in self.atoms.dihedrals:
+            atom1, atom2, atom3, atom4 = tuple(dihedral.atoms)
+            if str(atom1.type) > str(atom4.type):
+                dihedral.atoms = [atom4, atom3, atom2, atom1]
+            elif (str(atom1.type) == str(atom4.type) and
+                  str(atom2.type) > str(atom3.type)):
+                dihedral.atoms = [atom4, atom3, atom2, atom1]
+
+    def write_par(self, output_path):
+        """Check docstring of ForceField.write_par()"""
+
+        with open(output_path, "w") as F:
+
+            F.write("Atom Types\n\n")
+            F.write("# type\t'charge'\tepsilon\tsigma\n")
+            for atom_type in self.atoms.atom_types:
+                F.write("\t".join([str(atom_type), str(0.0000),
+                                   str(atom_type.epsilon), str(atom_type.sigma)]) + "\n")
+
+            F.write("\nBond Types\n\n")
+            F.write("# bond_type\tincrement\tr0\tk2\tk3\tk4\n")
+            for bond_type in self.atoms.bond_types:
+                F.write("\t".join([str(bond_type), str(bond_type.increment),
+                                   str(bond_type.r0), str(bond_type.k),
+                                   str(bond_type.k3), str(bond_type.k4)]) + "\n")
+
+            F.write("\nAngle Types\n\n")
+            F.write("# angle_type\ttheta0\tk2\tk3\tk4\n")
+            for angle_type in self.atoms.angle_types:
+                F.write("\t".join([str(angle_type),
+                                   str(angle_type.theta0), str(angle_type.k),
+                                   str(angle_type.k3), str(angle_type.k4)]) + "\n")
+
+            F.write("\nDihedral Types\n\n")
+            F.write("# dihedral_type\tk1\tphi1\tk2\tphi2\tk3\tphi3\n")
+            for dihedral_type in self.atoms.dihedral_types:
+                F.write("\t".join([str(dihedral_type),
+                                   str(dihedral_type.k), str(dihedral_type.phi1),
+                                   str(dihedral_type.k2), str(dihedral_type.phi2),
+                                   str(dihedral_type.k3), str(dihedral_type.phi3)]) + "\n")
+
+            F.write("\nImproper Types\n\n")
+            F.write("# improper_type\tk\tx0=0\n")
+            for improper_type in self.atoms.improper_types:
+                F.write("\t".join([improper_type.compass_order,
+                                   str(improper_type.k), str(improper_type.x0)]) + "\n")
+
+            F.write("\nBondBond Coeffs\n\n")
+            F.write("# angle_type\tm\tr1\tr2\n")
+            for angle_type in self.atoms.angle_types:
+                F.write("\t".join([str(angle_type), str(angle_type.ij_jk), str(angle_type.r1),
+                                   str(angle_type.r2)]) + "\n")
+
+            F.write("\nBondAngle Coeffs\n\n")
+            F.write("# angle_type\tn1\tn2\tr1\tr2\n")
+            for angle_type in self.atoms.angle_types:
+                F.write("\t".join([str(angle_type), str(angle_type.ij_ijk), str(angle_type.jk_ijk),
+                                   str(angle_type.r1), str(angle_type.r2)]) + "\n")
+
+            F.write("\nMiddleBondTorsion Coeffs\n\n")
+            F.write("# dihedral_type\ta1\ta2\ta3\tr2\n")
+            for dihedral_type in self.atoms.dihedral_types:
+                F.write("\t".join([str(dihedral_type),
+                                   str(dihedral_type.a1), str(dihedral_type.a2),
+                                   str(dihedral_type.a3), str(dihedral_type.r2)]) + "\n")
+
+            F.write("\nEndBondTorsion Coeffs\n\n")
+            F.write("# dihedral_type\tb1\tb2\tb3\tc1\tc2\tc3\tr1\tr3\n")
+            for dihedral_type in self.atoms.dihedral_types:
+                F.write("\t".join([str(dihedral_type),
+                                   str(dihedral_type.b1), str(dihedral_type.b2),
+                                   str(dihedral_type.b3), str(dihedral_type.c1),
+                                   str(dihedral_type.c2), str(dihedral_type.c3),
+                                   str(dihedral_type.r1), str(dihedral_type.r3)]) + "\n")
+
+            F.write("\nAngleTorsion Coeffs\n\n")
+            F.write("# dihedral_type\td1\td2\td3\te1\te2\te3\ttheta1\ttheta2\n")
+            for dihedral_type in self.atoms.dihedral_types:
+                F.write("\t".join([str(dihedral_type),
+                                   str(dihedral_type.d1), str(dihedral_type.d2),
+                                   str(dihedral_type.d3), str(dihedral_type.e1),
+                                   str(dihedral_type.e2), str(dihedral_type.e3),
+                                   str(dihedral_type.theta1), str(dihedral_type.theta2)]) + "\n")
+
+            F.write("\nAngleAngleTorsion Coeffs\n\n")
+            F.write("# dihedral_type\tij_ijkl_jkl\ttheta1\ttheta2\n")
+            for dihedral_type in self.atoms.dihedral_types:
+                F.write("\t".join([str(dihedral_type),
+                                   str(dihedral_type.ij_ijkl_jkl), str(dihedral_type.theta1),
+                                   str(dihedral_type.theta2)]) + "\n")
+
+            F.write("\nBondBond13 Coeffs\n\n")
+            F.write("# dihedral_type\tn\tr1\tr3\n")
+            for dihedral_type in self.atoms.dihedral_types:
+                F.write("\t".join([str(dihedral_type),
+                                   str(dihedral_type.n), str(dihedral_type.r1),
+                                   str(dihedral_type.r3)]) + "\n")
+
+            F.write("\nAngleAngle Coeffs\n\n")
+            F.write("# improper_type\tm1\tm2\tm3\ttheta1\ttheta2\ttheta3\n")
+            for improper_type in self.atoms.improper_types:
+                F.write("\t".join([str(improper_type),
+                                   str(improper_type.m1), str(improper_type.m2),
+                                   str(improper_type.m3), str(improper_type.theta1),
+                                   str(improper_type.theta2), str(improper_type.theta3)]) + "\n")

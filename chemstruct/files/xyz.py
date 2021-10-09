@@ -1,7 +1,7 @@
-# Copyright 2019 Pedro G. Demingos
-
 """Class for xyz (atomic coordinates) files."""
 
+
+import numpy as np
 from files.main import File, find_between
 from atoms import Atom, Atoms
 
@@ -133,10 +133,10 @@ class Xyz(File):
                     F.write(atom.__str__(real_type=real_types) + '\t# ' +
                             atom.classification + '\n')
 
-    def write_simple_cif(self, filename, struct_name, comment=None,
-                         centralize=True):
+    def write_simple_cif(self, filename, struct_name, centralize=True):
         """
-        Writes a simple cif file. Meant to be used for 1D structures.
+        Writes a simple cif file. Automatically diagonalizes the cell.
+        Works for 1D, 2D and 3D structures, including triclinic cells.
 
         Parameters
         ----------
@@ -144,17 +144,14 @@ class Xyz(File):
             Path to output cif file.
         struct_name : str
             Name of the structure, to be included in the file info.
-        comment : str, optional
-            Comment to the structure, to be included in the file info.
-            Standard comment is 'simple cif for 1D nanostructure'.
         centralize : bool, optional
             If the atomic positions should be centralized in the cell.
             Standard is True.
 
         Notes
         -----
-        This is a very simple cif writing for theoretical structures.
-        It's not meant to be used for complete crystallography information.
+        This is a simple cif writing for theoretical (e.g. DFT) structures;
+        it's not meant to be used for complete crystallographic information.
 
         """
 
@@ -162,43 +159,45 @@ class Xyz(File):
         if not self.atoms.atoms:
             self.read_xyz()
 
-        # arguments checking
-        struct_name = struct_name.replace(" ", "")
-        if comment is None:
-            comment = "simple cif for 1D nanostructure"
+        struct_name = struct_name.replace(" ", "-")
+
+        if centralize:
+            self.atoms.translate_to_cell_center()
+
+        # the following includes the diagonalize_cell(),
+        # which has to be done so the atomic coordinates correspond to the
+        # xyz axes defined by the abc vectors of the cell,
+        # i.e. a is parallel to x, and b is in the xy plane
+        self.atoms.compute_fractional_positions()
 
         with open(filename, "w") as F:
 
             F.write("data_" + struct_name + "\n\n")
 
-            F.write("_publ_section_comment" + "\n" + ";" + "\n"
-                    + comment + "\n" + ";" + "\n\n")
+            a = np.linalg.norm(self.atoms.a)
+            b = np.linalg.norm(self.atoms.b)
+            c = np.linalg.norm(self.atoms.c)
+            alpha = self.atoms.alpha * 180 / np.pi  # degrees
+            beta = self.atoms.beta * 180 / np.pi  # degrees
+            gama = self.atoms.gama * 180 / np.pi  # degrees
 
-            cell_x = self.atoms.cell[0][0]
-            cell_y = self.atoms.cell[1][1]
-            cell_z = self.atoms.cell[2][2]
+            F.write("_cell_length_a " + str(round(a, 4)) + "(0)" + "\n")
+            F.write("_cell_length_b " + str(round(b, 4)) + "(0)" + "\n")
+            F.write("_cell_length_c " + str(round(c, 4)) + "(0)" + "\n")
+            F.write("_cell_angle_alpha " + str(round(alpha, 4)) + "(0)" + "\n")
+            F.write("_cell_angle_beta " + str(round(beta, 4)) + "(0)" + "\n")
+            F.write("_cell_angle_gamma " + str(round(gama, 4)) + "(0)" + "\n\n")
 
-            F.write("_cell_length_a " + str(round(cell_x, 4)) + "(0)" + "\n")
-            F.write("_cell_length_b " + str(round(cell_y, 4)) + "(0)" + "\n")
-            F.write("_cell_length_c " + str(round(cell_z, 4)) + "(0)" + "\n")
-            F.write("_cell_angle_alpha 90.0000(0)" + "\n")
-            F.write("_cell_angle_beta 90.0000(0)" + "\n")
-            F.write("_cell_angle_gamma 90.0000(0)" + "\n\n")
-
-            F.write("_symmetry_space_group_name_H-M 'P 1'" + "\n")
-            F.write("_symmetry_Int_Tables_number 1" + "\n")
-            F.write("_symmetry_cell_setting triclinic" + "\n\n")
+            # F.write("_symmetry_space_group_name_H-M 'P 1'" + "\n")
+            # F.write("_symmetry_Int_Tables_number 1" + "\n")
+            # F.write("_symmetry_cell_setting triclinic" + "\n\n")
 
             F.write("loop_" + "\n")
             F.write("_atom_site_label" + "\n")
             F.write("_atom_site_type_symbol" + "\n")
-            F.write("_atom_site_occupancy" + "\n")
             F.write("_atom_site_fract_x" + "\n")
             F.write("_atom_site_fract_y" + "\n")
             F.write("_atom_site_fract_z" + "\n")
-
-            if centralize:
-                self.atoms.translate_to_cell_center()
 
             counter = dict()
             for atom in self.atoms:
@@ -210,7 +209,7 @@ class Xyz(File):
                     counter[atom_type] = 1
 
                 F.write(atom_type + str(counter[atom_type]) + " " +
-                        atom.type.real + " 1.0000 " +
-                        str(round(atom.position[0] / cell_x, 4)) + " " +
-                        str(round(atom.position[1] / cell_y, 4)) + " " +
-                        str(round(atom.position[2] / cell_z, 4)) + "\n")
+                        atom.type.real + " " +
+                        str(round(atom.fractional_position[0], 4)) + " " +
+                        str(round(atom.fractional_position[1], 4)) + " " +
+                        str(round(atom.fractional_position[2], 4)) + "\n")

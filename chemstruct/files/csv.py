@@ -1,6 +1,5 @@
-# Copyright 2019 Pedro G. Demingos
-
 """Simple class for Comma-Separated Values files."""
+
 
 from files.main import *
 
