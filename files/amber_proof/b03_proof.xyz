@@ -1,0 +1,20 @@
+18
+Lattice="20.0 0.0 0.0 0.0 20.0 0.0 0.0 0.0 20.0"
+c2	-3.33359	0.4893	-0.02759	# conjugated CH2 sp2 C
+ce	-2.34566	1.09497	0.63552	# conjugated CHR sp2 C
+hc	-3.12129	-0.26048	-0.78416	# sp2 CH2 H
+hc	-4.36627	0.74465	0.18697	# sp2 CH2 H
+ce	-0.93214	0.76388	0.36056	# conjugated CHR sp2 C
+hc	-2.59157	1.84093	1.38659	# sp2 CHR H
+cf	0.0563	1.37424	1.02787	# conjugated CHR sp2 C
+hc	-0.18093	2.12228	1.78108	# sp2 CHR H
+cf	1.47036	1.0436	0.75309	# conjugated CHR sp2 C
+hc	-0.69553	0.01582	-0.39284	# sp2 CHR H
+ce	2.45867	1.65454	1.42005	# conjugated CHR sp2 C
+hc	1.70768	0.29539	7e-05	# sp2 CHR H
+hc	2.22185	2.4029	2.17309	# sp2 CHR H
+ce	3.87232	1.32405	1.14509	# conjugated CHR sp2 C
+c2	4.85997	1.93107	1.80741	# conjugated CH2 sp2 C
+hc	4.11856	0.57759	0.39463	# sp2 CHR H
+hc	4.64728	2.68146	2.56327	# sp2 CH2 H
+hc	5.89279	1.6763	1.59287	# sp2 CH2 H
