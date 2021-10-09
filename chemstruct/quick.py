@@ -3,13 +3,12 @@
 """Quick functions for generating LAMMPS Data files."""
 
 from constants import PACKAGE_DIR
-from files.charmm import CharmmGeneral
+from files.ff import CharmmGeneral, GeneralAmber, Dreiding, DPD
 from files.lmp import LmpDat
 
 
-def write_lmpdat(xyz_file: str, lmpdat_file: str, par_file=None,
-                 periodic="", simple=False):
-
+def write_lmpdat_charmm(xyz_file: str, lmpdat_file: str, par_file=None,
+                        periodic="", simple=False):
     """
     Writes a LAMMPS Data file with atom_style='full' from xyz file,
     using parameters from the CHARMM General Force Field.
@@ -51,10 +50,10 @@ def write_lmpdat(xyz_file: str, lmpdat_file: str, par_file=None,
 
     periodic = periodic.lower()
 
-    # CGenFF parameters from their original paper
-    prm_file = PACKAGE_DIR + "/par_all36_cgenff.prm"
+    # CGenFF parameters from the original paper
+    # prm_file = PACKAGE_DIR + "/par_all36_cgenff.prm"
 
-    charmm = CharmmGeneral(xyz_file=xyz_file, par_file=prm_file)
+    charmm = CharmmGeneral(xyz_file=xyz_file)
     charmm.compute_topology(periodic=periodic, simple=simple)
     if par_file is None:
         par_file = xyz_file.replace(".xyz", "(computed_parameters).par")
@@ -70,13 +69,64 @@ def write_lmpdat(xyz_file: str, lmpdat_file: str, par_file=None,
     lmp.write_lmpdat(lmpdat_file)
 
 
+def write_lmpdat_amber(xyz_file: str, lmpdat_file: str, par_file=None,
+                       periodic="", simple=False):
+    """
+
+    """
+
+    periodic = periodic.lower()
+
+    # GAFF parameters from the downloadable package
+    # prm_file = PACKAGE_DIR + "/gaff2.dat"
+
+    amber = GeneralAmber(xyz_file=xyz_file)
+    amber.compute_topology(periodic=periodic, simple=simple)
+    if par_file is None:
+        par_file = xyz_file.replace(".xyz", "(computed_parameters).par")
+    amber.write_par(xyz_file.replace(".xyz", "(computed_parameters).par"))
+    amber.atoms.write_xyz(xyz_file.replace(".xyz", ".types.xyz"))
+
+    input("Press anything when the par file is ready.")
+
+    lmp = LmpDat()
+    lmp.atoms = amber.atoms
+    lmp.get_params(par_file)
+    lmp.cell_to_lo_hi()
+    lmp.write_lmpdat(lmpdat_file)
+
+
+def write_lmpdat_dreiding(xyz_file: str, lmpdat_file: str, par_file=None,
+                          periodic="", simple=False):
+    """
+
+    """
+
+    periodic = periodic.lower()
+
+    dreiding = Dreiding(xyz_file=xyz_file)
+    dreiding.compute_topology(periodic=periodic, simple=simple)
+    if par_file is None:
+        par_file = xyz_file.replace(".xyz", "(computed_parameters).par")
+    dreiding.write_par(xyz_file.replace(".xyz", "(computed_parameters).par"))
+    dreiding.atoms.write_xyz(xyz_file.replace(".xyz", ".types.xyz"))
+
+    input("Press anything when the par file is ready.")
+
+    # lmp = LmpDat()
+    # lmp.atoms = amber.atoms
+    # lmp.get_params(par_file)
+    # lmp.cell_to_lo_hi()
+    # lmp.write_lmpdat(lmpdat_file)
+
+
 def finish_lmpdat(xyz_types_file: str, lmpdat_file: str, par_file: str,
                   periodic="", simple=False):
     """
     Writes a LAMMPS Data file with atom_style='full' from classified xyz file,
-    which can be generated with the write_lmpdat function.
+    which can be generated with the write_lmpdat functions.
 
-    This function (finish_lmpdat) is supposed to be used when write_lmpdat
+    This function (finish_lmpdat) is supposed to be used when a write_lmpdat
     stops before finishing (if the par file is not ready when it should be),
     or if there is an xyz file with the wanted atom types, as well as a par
     file with the corresponding parameters (e.g. for a force field other than
@@ -111,10 +161,28 @@ def finish_lmpdat(xyz_types_file: str, lmpdat_file: str, par_file: str,
 
     """
 
-    periodic = periodic.lower()
-
     lmp = LmpDat()
     lmp.get_xyz(xyz_types_file)
     lmp.atoms.compute_topology(periodic=periodic, simple=simple)
     lmp.get_params(par_file)
     lmp.write_lmpdat(lmpdat_file)
+
+
+def write_lmpdat_dpd(xyz_file: str, lmpdat_file: str, coef_file: str,
+                        par_file=None, periodic="", simple=False):
+    """"""
+    dpd = DPD(coef_file=coef_file, xyz_file=xyz_file)
+    dpd.compute_topology(periodic=periodic, simple=simple)
+    if par_file is None:
+        par_file = xyz_file.replace(".xyz", "(computed_parameters).par")
+    dpd.write_par(xyz_file.replace(".xyz", "(computed_parameters).par"))
+    dpd.atoms.write_xyz(xyz_file.replace(".xyz", ".types.xyz"))
+
+    input("Press anything when the par file is ready.")
+
+    sp = LmpDat()
+    sp.atoms = dpd.atoms
+    sp.get_params(par_file)
+    sp.cell_to_lo_hi()
+    sp.write_lmpdat(lmpdat_file, atom_style='bond', comments=True)
+    dpd.lmp_complement(lmpdat_file)

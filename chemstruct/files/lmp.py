@@ -1,5 +1,3 @@
-# Copyright 2019 Pedro G. Demingos
-
 """
 Defines classes for dealing with LAMMPS input and output files.
 
@@ -21,6 +19,79 @@ from tools import linear_counter
 from files.main import File, find_between, clear_end
 from files.csv import Csv
 from files.xyz import Xyz
+
+
+def cfg_dir_to_atomic_densities(dir_path: str, axis: str, bins: int,
+                                ignore_types=None, step_start=None,
+                                step_end=None):
+    """
+    Reads position of every atom from all cfg files in the directory,
+    and writes csv files with atom count along one dimension
+    for every atomic type found.
+
+    Parameters
+    ----------
+    dir_path : str
+        Path to directory containing the cfg files.
+    axis : str
+        Axis along which the atoms shall be counted.
+        Expected: 'x' or 'y' or 'z'.
+    bins : int
+        Number of bins i.e. in how many parts the axis shall be divided.
+        Determines density resolution. Mind the cell size.
+    ignore_types : list of strings, optional
+        Atomic types that shall not be counted. For optimization only.
+
+    Notes
+    -----
+    Non-cfg files may be present in the directory. Only files ending in
+    '.cfg' will be considered.
+    Can be used to compute Potential Mean Force (PMF).
+
+    """
+
+    if ignore_types is None:
+        ignore_types = []
+
+    positions = dict()
+    # keys are strings with atom types, values are lists with position in axis
+
+    all_entries = os.listdir(dir_path)
+    if step_start and step_end:
+        cfg_paths = []
+        for entry in all_entries:
+            if entry.endswith(".cfg"):
+                _, step, cfg = entry.split(".")
+                step = int(step)
+                if (step >= step_start) and (step <= step_end):
+                    cfg_paths.append(dir_path + "/" + entry)
+    else:
+        cfg_paths = [dir_path + "/" + entry for
+                     entry in all_entries if entry.endswith(".cfg")]
+
+    print("Computing cfg files...")
+    counter = 1
+    for cfg_path in cfg_paths:
+        cfg = Cfg(cfg_path, ignore_types=ignore_types)
+        if not positions:
+            for atom_type in cfg.atoms.atom_types:
+                if atom_type not in ignore_types:
+                    positions[str(atom_type)] = []
+        for atom in cfg.atoms:
+            try:
+                positions[str(atom.type)].append(atom.position)
+            except KeyError:
+                continue
+        if counter % 10 == 0:
+            print("{}/{} cfg files computed...".format(counter, len(cfg_paths)))
+        counter += 1
+
+    print("Writing csv files...")
+    for (atom_type, type_positions) in positions.items():
+        csv_name = dir_path.replace("/cfg", "") + \
+                   "/" + "[" + axis + "." + str(bins) + "." + atom_type + "].csv"
+        linear_counter(type_positions, axis, bins, output_path=csv_name)
+    print("Done")
 
 
 class LmpDat(File):
@@ -469,6 +540,10 @@ class LmpDat(File):
             atoms, bonds, angles, dihedrals, impropers = True, False, False, False, False
             molecule, charge = False, True
             parameters = False
+        elif atom_style == 'bond':
+            atoms, bonds, angles, dihedrals, impropers = True, True, False, False, False
+            molecule, charge = True, False
+            parameters = False
         else:  # to be expanded as needed
             raise TypeError("bad atom_style")
 
@@ -510,6 +585,8 @@ class LmpDat(File):
             F.write(str(self._xyz_lo_hi[2]) + " " + str(self._xyz_lo_hi[3]) + " " + "ylo yhi \n")
             F.write(str(self._xyz_lo_hi[4]) + " " + str(self._xyz_lo_hi[5]) + " " + "zlo zhi \n\n")
 
+            # TODO tilt
+
             F.write("Masses \n\n")
             for typ in self.atoms.atom_types:
                 F.write(str(typ.index) + " " + str(typ.mass) + "  # " + str(typ) + "\n")
@@ -527,6 +604,13 @@ class LmpDat(File):
                         F.write(str(atom.index) + " " + str(atom.molecule.index) + " " + str(atom.type.index) +
                                 " " + str(atom.charge) + " " + " ".join(str(pos) for pos in atom.position)
                                 + "  # " + str(atom.type) + "\n")
+                elif molecule:
+                    for atom in self.atoms.atoms:
+                        if atom.molecule.index is None:
+                            atom.molecule.index = 1
+                            molecule_flag = True
+                        F.write(str(atom.index) + " " + str(atom.molecule.index) + " " + str(atom.type.index) + " " +
+                                " ".join(str(pos) for pos in atom.position) + "  # " + str(atom.type) + "\n")
                 elif charge:
                     for atom in self.atoms.atoms:
                         if atom.charge is None:
@@ -673,7 +757,22 @@ class LmpOut(File):
 
             headers = tuple(self.content[start_i + 1].split())
             columns = [[] for _ in range(len(headers))]
+            shake_flag_1, shake_flag_2 = False, False
+
             for line in self.content[start_i + 2:end_i]:
+
+                # ignores the 3 lines of SHAKE output, if they exist
+                if line.startswith("SHAKE"):
+                    shake_flag_1 = True
+                    continue
+                if shake_flag_1:
+                    shake_flag_1 = False
+                    shake_flag_2 = True
+                    continue
+                if shake_flag_2:
+                    shake_flag_2 = False
+                    continue
+
                 terms = tuple(line.split())
                 for i in range(len(headers)):
                     columns[i].append(float(terms[i]))
@@ -731,6 +830,7 @@ class LmpOut(File):
 
 class Cfg(File):
     """Class for LAMMPS cfg files."""
+
     # usual line: "mass type x y z *etc" where len(x,y,z,*etc) == entry_count
 
     def __init__(self, absolute_path=None,
@@ -754,9 +854,9 @@ class Cfg(File):
     def read(self):
 
         index_start = self._find("Number of particles")[0]
+        self.number_of_particles = int(self.content[index_start].split()[-1])
         index_auxiliary = None
         index_atoms = None
-        self.number_of_particles = int(self.content[index_start].split()[-1])
 
         h0_11, h0_12, h0_13, h0_21, h0_22, h0_23, h0_31, h0_32, h0_33 = 0, 0, 0, 0, 0, 0, 0, 0, 0
 
@@ -835,3 +935,102 @@ class Cfg(File):
         xyz = Xyz()
         xyz.atoms = self.atoms
         xyz.write_xyz(path, real_types=real_types)
+
+
+class Rdf(File):
+    """Class for LAMMPS RDF (Radial Density Function) files.
+    For more info: https://lammps.sandia.gov/doc/compute_rdf.html"""
+
+    def __init__(self, absolute_path=None):
+        super().__init__(absolute_path=absolute_path)
+
+        self.r = []  # just a list
+        self.gs = []  # will be a list of lists
+        self.coords = []  # will be a list of lists
+
+        if self.absolute_path is not None:
+            self.read()
+
+    def read(self):
+
+        number_of_bins = int(self.content[3].split()[1])
+        # should be the line for the first timestep
+        # e.g. "10000 500" for 500 bins
+        number_of_pairs = int((len(self.content[4].split()) - 2) / 2)
+        # this should be the first rdf line!
+        # e.g. "1 0.012 0 0 0 0 0 0" for 3 pairs
+        for _ in range(number_of_pairs):
+            self.gs.append(np.empty([1, number_of_bins]))
+            self.coords.append(np.empty([1, number_of_bins]))
+
+        number_of_outputs = 1
+        rs = []
+        gs = [[] for _ in range(number_of_pairs)]
+        coords = [[] for _ in range(number_of_pairs)]
+
+        for line in self.content[4:]:
+            line_tuple = tuple(line.split())
+
+            if len(line_tuple) > 2:
+                n, r, *g_coord = line_tuple  # n is not used
+                rs.append(float(r))
+                for i in range(0, number_of_pairs * 2, 2):
+                    gs[int(i / 2)].append(g_coord[i])
+                    coords[int(i / 2)].append(g_coord[i + 1])
+
+            else:  # not enough values to unpack
+                # timestep, n_bins = line_tuple  # not used really
+                number_of_outputs += 1
+                for i in range(number_of_pairs):
+                    self.gs[i] += np.array(gs[i]).astype(float)
+                    self.coords[i] += np.array(coords[i]).astype(float)
+                rs = []  # don't really need to do this multiple times thou
+                gs = [[] for _ in range(number_of_pairs)]
+                coords = [[] for _ in range(number_of_pairs)]
+
+        self.r = rs
+        for i in range(number_of_pairs):
+            self.gs[i] /= number_of_outputs
+            self.coords[i] /= number_of_outputs
+        print("RDF file was read")
+
+    def write_single_rdf(self, output_path):
+        csv = Csv()
+        csv.add_header("r")
+        csv.add_array(self.r)
+        for (i, g) in enumerate(self.gs):
+            csv.add_header("g(r)_{}".format(i + 1))
+            csv.add_array([l[0] for l in list(np.transpose(g))])
+        csv.write_csv(output_path)
+
+
+class Msd(File):
+    """Class for LAMMPS MSD (Mean-Square Displacement) files.
+    For more info: https://lammps.sandia.gov/doc/compute_msd.html"""
+
+    def __init__(self, absolute_path=None):
+        super().__init__(absolute_path=absolute_path)
+
+        self.timestep = []
+        self.r2 = []
+
+        if self.absolute_path is not None:
+            self.read()
+
+    def read(self):
+
+        for line in self.content[3:]:
+            n_one, n_two = tuple(line.split())
+            if n_two == "4":  # timestep line e.g. "10000 4"
+                self.timestep.append(n_one)
+            elif n_one == "4":  # msd line e.g. "4 4.78165"
+                self.r2.append(n_two)
+        print("MSD file was read")
+
+    def write_single_msd(self, output_path):
+        csv = Csv()
+        csv.add_header("timestep")
+        csv.add_array(self.timestep)
+        csv.add_header("r2")
+        csv.add_array(self.r2)
+        csv.write_csv(output_path)
