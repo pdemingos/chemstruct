@@ -1,0 +1,26 @@
+24
+Lattice="20.0 0.0 0.0 0.0 20.0 0.0 0.0 0.0 20.0"
+ca	-3.30269	0.14802	0.99505	# 6-ring aromatic C
+ca	-3.32418	0.33948	-0.38904	# 6-ring aromatic C
+ca	-2.08448	0.07816	1.67697	# 6-ring aromatic C
+ha	-4.23257	0.05346	1.54084	# 6-ring aromatic H
+ca	-2.12761	0.46246	-1.1011	# 6-ring aromatic C
+ha	-4.27064	0.39269	-0.91142	# 6-ring aromatic H
+ca	-0.87531	0.20002	0.97394	# 6-ring aromatic C
+ha	-2.08475	-0.07069	2.75026	# 6-ring aromatic H
+ca	-0.89709	0.39403	-0.42856	# 6-ring aromatic C
+ha	-2.1612	0.61049	-2.17398	# 6-ring aromatic H
+ca	0.35127	0.13074	1.65108	# 6-ring aromatic C
+ca	0.308	0.51629	-1.13612	# 6-ring aromatic C
+ca	1.53459	0.44678	-0.45901	# 6-ring aromatic C
+ca	1.55636	0.25277	0.94349	# 6-ring aromatic C
+ha	0.36795	-0.01792	2.72556	# 6-ring aromatic H
+ca	2.78689	0.18382	1.61596	# 6-ring aromatic C
+ha	0.29132	0.6649	-2.2106	# 6-ring aromatic H
+ca	2.74377	0.56811	-1.16211	# 6-ring aromatic C
+ca	3.962	0.49752	-0.48029	# 6-ring aromatic C
+ca	3.98348	0.30606	0.9038	# 6-ring aromatic C
+ha	2.82049	0.03572	2.68883	# 6-ring aromatic H
+ha	4.92996	0.2522	1.4261	# 6-ring aromatic H
+ha	2.74405	0.71688	-2.23541	# 6-ring aromatic H
+ha	4.89189	0.59142	-1.02617	# 6-ring aromatic H

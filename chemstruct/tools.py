@@ -17,7 +17,7 @@ def proj(b, a):
     return np.dot(a, b) / np.linalg.norm(a)**2 * a
 
 
-def break_regions(points, cell, gap=2.0, struct="bonds"):
+def break_regions(points, cell, gap=6.0, struct="bonds"):
     """
     Takes a list of points in 3D space and divides them in sub-regions.
     System must be periodic to work properly. Cell can be triclinic.

@@ -11,7 +11,11 @@ import math
 from time import time
 
 from constants import BOND_LENGTHS, ATOMIC_MASSES, axis_to_dim
-from tools import break_regions
+
+
+# from tools import break_regions
+
+norm = np.linalg.norm
 
 
 class Atom:
@@ -30,17 +34,21 @@ class Atom:
         self.type = kwargs.get("atom_type", "Atom")
         self._position = None
         self.position = kwargs.get("position", [0, 0, 0])
-        self.if_pos = kwargs.get("if_pos", [1, 1, 1])  # QE
+        self.fractional_position = None
+        self.if_pos = kwargs.get("if_pos", [1, 1, 1])  # QE, VASP
         self.charge = kwargs.get("charge", None)
         self.etc = dict()
+        self.tags = set()
 
         # molecular info
         self.neighbors = set()  # set of atoms this atom is bonded to
         self.molecule = None
         self.hybridization = None
+        self.resonance_sp2 = False  # sp2 DUE TO resonance (not coordination)
         self.cycles = []
         self.topological_tags = set()
         self.classification = None
+        self.bonds = []  # add angles etc ?
 
     def __str__(self, real_type=False):
         return self._type.__str__(real_type=real_type) + \
@@ -97,6 +105,18 @@ class Atom:
         except ValueError:
             raise ValueError("items in position must be numbers")
         self._position = np.round(self._position, 6)
+
+    @property
+    def x(self):
+        return self._position[0]
+
+    @property
+    def y(self):
+        return self._position[1]
+
+    @property
+    def z(self):
+        return self._position[2]
 
     def get_neighbors(self, neighbor_type_real: str):
         """Returns a list of all the atom's neighbors with given real type.
@@ -159,6 +179,7 @@ class Atoms:
         self.dihedrals = []
         self.impropers = []
         self.cycles = [None, None, None, []]  # 0, 1, 2, 3
+        self.cycles_all = []  # all cycles in one list
         self.molecules = []
 
         # topological types
@@ -243,6 +264,116 @@ class Atoms:
                              " got {}".format(dummy_cell.shape))
         self._cell = dummy_cell
 
+    @property
+    def a(self):
+        """First cell vector"""  # parallel to x axis
+        return self.cell[0]
+
+    @property
+    def b(self):
+        """Second cell vector"""  # in the xy plane
+        return self.cell[1]
+
+    @property
+    def c(self):
+        """Third cell vector"""
+        return self.cell[2]
+
+    @property
+    def alpha(self):
+        """First cell angle"""  # between b and c
+        return np.arccos(np.dot(self.b, self.c) / norm(self.b) / norm(self.c))
+
+    @property
+    def beta(self):
+        """Second cell angle"""  # between a and c
+        return np.arccos(np.dot(self.a, self.c) / norm(self.a) / norm(self.c))
+
+    @property
+    def gama(self):
+        """Third cell angle"""  # between a and b
+        return np.arccos(np.dot(self.a, self.b) / norm(self.a) / norm(self.b))
+
+    def diagonalize_cell(self):
+        """Rotates cell vectors and atomic positions to produce an
+        equivalent diagonalized cell."""
+
+        a = self.cell[0]  # first line vector
+        b = self.cell[1]  # second line vector
+        c = self.cell[2]  # third line vector
+
+        # find a_new i.e. parallel to x
+        a_norm = np.linalg.norm(a)
+        a_new = np.asarray([a_norm, 0.0, 0.0])
+
+        # find angles alpha i.e. angle between a and xy plane,
+        # and beta i.e. angle between x and xy plane
+        a_proj_xy = np.asarray([a[0], a[1], 0.0])
+        cos_alpha = np.dot(a, a_proj_xy) / (norm(a_proj_xy) * a_norm)
+        alpha = np.arccos(cos_alpha)
+        cos_beta = np.dot(a_proj_xy, a_new) / (norm(a_proj_xy) * a_norm)
+        beta = np.arccos(cos_beta)
+
+        # rotate b, c and atoms by -beta around z
+        # then by alpha around y
+        rot2 = np.asarray([[np.cos(alpha), 0, np.sin(alpha)],
+                           [0, 1, 0],
+                           [-np.sin(alpha), 0, np.cos(alpha)]])
+        rot1 = np.asarray([[np.cos(-beta), -np.sin(-beta), 0],
+                           [np.sin(-beta), np.cos(-beta), 0],
+                           [0, 0, 1]])
+        b = np.dot(rot1, b)
+        b = np.dot(rot2, b)
+        c = np.dot(rot1, c)
+        c = np.dot(rot2, c)
+        for atom in self.atoms:
+            atom.position = np.dot(rot1, atom.position)
+            atom.position = np.dot(rot2, atom.position)
+
+        # find b_new i.e. in xy plane
+        b_proj_xy = np.asarray([b[0], b[1], 0.0])
+        b_new = b_proj_xy / norm(b_proj_xy) * norm(b)
+
+        # find angles gama i.e. angle between b and xy plane
+        # and delta i.e. angle between b and xz plane
+        cos_gama = np.dot(b, b_new) / (norm(b) * norm(b_new))
+        gama = np.arccos(cos_gama)
+        cos_delta = np.dot(a_new, b_new) / (norm(a_new) * norm(b_new))
+        delta = np.arccos(cos_delta)
+
+        # rotate c and atoms by -delta around z
+        # then by gama around y
+        # then by delta around z
+        rot3 = np.asarray([[np.cos(-delta), -np.sin(-delta), 0],
+                           [np.sin(-delta), np.cos(-delta), 0],
+                           [0, 0, 1]])
+        rot4 = np.asarray([[np.cos(gama), 0, np.sin(gama)],
+                           [0, 1, 0],
+                           [-np.sin(gama), 0, np.cos(gama)]])
+        rot5 = np.asarray([[np.cos(delta), -np.sin(delta), 0],
+                           [np.sin(delta), np.cos(delta), 0],
+                           [0, 0, 1]])
+        c = np.dot(rot3, c)
+        c = np.dot(rot4, c)
+        c = np.dot(rot5, c)
+        for atom in self.atoms:
+            atom.position = np.dot(rot3, atom.position)
+            atom.position = np.dot(rot4, atom.position)
+            atom.position = np.dot(rot5, atom.position)
+
+        # finished
+        c_new = c
+        self.cell = [a_new, b_new, c_new]
+
+    def compute_fractional_positions(self):
+        """Fractional positions are fractions of the abc cell vectors,
+        i.e. a position which is in the abc basis."""
+        self.diagonalize_cell()
+        basis_matrix = np.array([self.a, self.b, self.c]).transpose()
+        inverse_matrix = np.linalg.inv(basis_matrix)
+        for atom in self.atoms:
+            atom.fractional_position = inverse_matrix.dot(atom.position)
+
     def copy(self, topology=False):
         """Returns new Atoms object with the same topological structures."""
         copy = Atoms([])
@@ -283,9 +414,12 @@ class Atoms:
         return copy
 
     def add_bond(self, bond: list):
-        self.bonds.append(Bond(bond))
+        bond_object = Bond(bond)
+        self.bonds.append(bond_object)
         bond[0].neighbors.add(bond[1])
         bond[1].neighbors.add(bond[0])
+        bond[0].bonds.append(bond_object)
+        bond[1].bonds.append(bond_object)
 
     def add_angle(self, angle: list):
         self.angles.append(Angle(angle))
@@ -320,17 +454,21 @@ class Atoms:
 
     def has_same_bonds(self, other_atoms):
         """Checks if two Atoms objects have the same bonds.
-        The order of the atoms must be the same."""
+        The order of the atoms must be the same.
+        Calls pool_topological_types for both Atoms objects."""
         if len(self) != len(other_atoms):
             return False
         if len(self.bonds) != len(other_atoms.bonds):
             return False
+
+        # so the index of the atoms correspond to their order in .atoms
+        self.pool_topological_types()
+        other_atoms.pool_topological_types()
+
         for (i, atom) in enumerate(self.atoms):
             other = other_atoms.atoms[i]
-            # print("{}={}".format(i, atom.index))
             atom_neighbors = {n.index for n in atom.neighbors}
             other_neighbors = {n.index for n in other.neighbors}
-            # print(atom_neighbors, other_neighbors)
             if atom_neighbors == other_neighbors:
                 continue
             else:
@@ -339,7 +477,7 @@ class Atoms:
 
     def compute_topology(self, periodic="", impropers=True, complete=False,
                          molecules=True, hold_pool_top_types=False,
-                         bonds=True, simple=False):
+                         bonds=True, simple=False, clear=True):
         """
         Finds topological structures: bonds, angles and dihedrals.
         If asked, classifies atoms, finding hybridizations, molecules, etc.
@@ -348,7 +486,7 @@ class Atoms:
         ----------
         periodic : str, optional
             Axes in which the system is periodic (e.g. 'xyz', 'xy', 'z';
-            use an empty string '' for non-periodic). Standard is ''.
+            use an empty string '' for non-periodic). Standard is False.
         impropers : bool, optional
             If improper dihedrals are wanted. Standard is True.
         complete : bool, optional
@@ -367,6 +505,9 @@ class Atoms:
             If a simple, less optimised algorithm is wanted for computing
             bonds, angles and dihedrals. (For small systems. See Notes.)
             Standard is False.
+        clear : bool, optional
+            For erasing the topological types in the directory of their
+            classes. Standard is True. (Changing to False might cause bugs.)
 
         Notes
         -----
@@ -384,6 +525,14 @@ class Atoms:
         Not doing this may cause problems.
 
         """
+
+        # clears dicts of topological types
+        if clear:
+            # AtomType.instances_dict = dict()
+            BondType.instances_dict = dict()
+            AngleType.instances_dict = dict()
+            DihedralType.instances_dict = dict()
+            ImproperType.instances_dict = dict()
 
         # bonds come first
         if bonds:
@@ -412,7 +561,7 @@ class Atoms:
 
         # for specific atom types, e.g. for force field classification
         if complete:
-            self.find_planar_cycles()
+            self.classify_cycles()  # planar, heterocycle (etc)
             # self.compute_bond_orders()
             self.compute_atom_classification()
             # ...
@@ -451,7 +600,7 @@ class Atoms:
             'bonds', 'angles' or 'dihedrals'.
         periodic : str, optional
             Axes in which the system is periodic (e.g. 'xyz', 'xy', 'z';
-            use an empty string '' for non-periodic). Standard is ''.
+            use an empty string '' for non-periodic). Standard is False.
         simple : bool, optional
             If a simple, less optimised algorithm is wanted for computing
             bonds, angles and dihedrals. (For small systems. See Notes.)
@@ -470,6 +619,8 @@ class Atoms:
         that checks all the pairs.
 
         """
+
+        from tools import break_regions
 
         # casts False to empty string
         if not periodic:
@@ -840,15 +991,21 @@ class Atoms:
                                                             atom3, atom4,
                                                             atom5, atom6,
                                                             atom7, atom8])
+        self.cycles_all = []
+        for part in self.cycles:
+            if part is not None:
+                for cycle in part:
+                    self.cycles_all.append(cycle)
 
-    def find_planar_cycles(self):
+    def classify_cycles(self):
+        hets = ["N", "O", "P", "S"]  # etc
         for order in self.cycles:
             try:
                 for cycle in order:
-                    if all((atom.hybridization == "sp2" or
-                            atom.hybridization == "other") for atom in cycle):
-                        # the "other" is there because of Sulfur
+                    if all(atom.hybridization == "sp2" for atom in cycle):
                         cycle.is_planar = True
+                    if any(a.type.real in hets for a in cycle.atoms):
+                        cycle.is_heterocycle = True
             except TypeError:  # order is None
                 continue
 
@@ -988,7 +1145,7 @@ class Atoms:
                     atom.hybridization = "other"
 
             elif atom.type.real == "N":
-                # nitrogen is more complicated than this, see below
+                # is more complicated than this, see below
                 if len(atom.neighbors) == 3:
                     atom.hybridization = "sp3"
                 elif len(atom.neighbors) == 2:
@@ -998,30 +1155,55 @@ class Atoms:
                 else:
                     atom.hybridization = "other"
 
-            elif atom.type.real == "O":
+            elif atom.type.real in ["O", "S"]:
+                # is more complicated than this, see below
                 if len(atom.neighbors) == 2:
                     atom.hybridization = "sp3"
-                elif len(atom.neighbors) == 1:
+                elif len(atom.neighbors) in (1, 3, 4):
                     atom.hybridization = "sp2"
                 else:
                     atom.hybridization = "other"
 
-            else:
+            elif atom.type.real == "P":
+                # is more complicated than this, see below
+                if len(atom.neighbors) == 3:
+                    atom.hybridization = "sp3"
+                elif len(atom.neighbors) in [2, 4]:
+                    atom.hybridization = "sp2"
+                elif len(atom.neighbors) == 1:
+                    atom.hybridization = "sp"
+                else:
+                    atom.hybridization = "other"
+
+            else:  # H etc
                 atom.hybridization = "other"
-                # H, S, P, etc
 
         # second look, based on possible resonance
         for atom in self.atoms:
-            if atom.type.real == "N":
+            # continue
+
+            if atom.type.real in ["N", "P"]:
                 if atom.hybridization == "sp3":  # because 3 neighbors
                     if any(a.hybridization == "sp2" for a in atom.neighbors):
                         atom.hybridization = "sp2"
+                        atom.resonance_sp2 = True
                         # is this always true? NO
-            elif atom.type.real == "O":
+
+            # elif atom.type.real == "S":
+            #     if atom.hybridization == "sp3":  # because 2 neighbors
+            #         if any(a.hybridization == "sp2" for a in atom.neighbors):
+            #             atom.hybridization = "sp2"
+            #             atom.resonance_sp2 = True
+
+        # third look, also resonance, more delicate cases
+        for atom in self.atoms:
+            if atom.type.real in ["O", "S"]:
                 if atom.hybridization == "sp3":  # because 2 neighbors
-                    if any(a.hybridization == "sp2" for a in atom.neighbors):
-                        atom.hybridization = "sp2"
-                        # is this always true?
+                    if "cycle 5" in atom.topological_tags:
+                        if sum(n.hybridization == "sp2"
+                               for n in atom.cycles[0]) == 4:
+                            atom.hybridization = "sp2"
+                            atom.resonance_sp2 = True
 
     def compute_bond_orders(self):
         pass  # in the future maybe
@@ -1055,25 +1237,11 @@ class Atoms:
             """Classifies amine nitrogen."""
             # for internal use
             # note: variable n is taken from out of this function
-            if ":C4" in n.topological_tags:
-                n.classification = "NC4+ N"
-            elif ":C3" in n.topological_tags:
-                n.classification = "amine NRR N"
-                for carbon in n.get_neighbors("C"):
-                    if ":H3" in carbon.topological_tags:
-                        carbon.classification = "amine NRR C"
-                        for hydrogen in carbon.get_neighbors("H"):
-                            hydrogen.classification = "amine NRR CH3 H"
-            elif ":C2" in n.topological_tags:
-                n.classification = "amine NHR N"
+            if len(n.neighbors) == 4:  # at least one will be carbon
+                n.classification = "NR4+ N"
                 for hydrogen in n.get_neighbors("H"):
-                    hydrogen.classification = "amine NHR H"
-                for carbon in n.get_neighbors("C"):
-                    if ":H3" in carbon.topological_tags:
-                        carbon.classification = "amine NHR C"
-                        for hydrogen in carbon.get_neighbors("H"):
-                            hydrogen.classification = "amine NHR CH3 H"
-            elif ":C1" in n.topological_tags:
+                    hydrogen.classification = "NR4+ H"
+            elif ":H2" in n.topological_tags:
                 n.classification = "amine NH2 N"
                 for hydrogen in n.get_neighbors("H"):
                     hydrogen.classification = "amine NH2 H"
@@ -1082,18 +1250,44 @@ class Atoms:
                         carbon.classification = "amine NH2 C"
                         for hydrogen in carbon.get_neighbors("H"):
                             hydrogen.classification = "amine NH2 CH3 H"
+            elif ":H1" in n.topological_tags:
+                n.classification = "amine NHR N"
+                for hydrogen in n.get_neighbors("H"):
+                    hydrogen.classification = "amine NHR H"
+                for carbon in n.get_neighbors("C"):
+                    if ":H3" in carbon.topological_tags:
+                        carbon.classification = "amine NHR C"
+                        for hydrogen in carbon.get_neighbors("H"):
+                            hydrogen.classification = "amine NHR CH3 H"
+            else:
+                n.classification = "amine NRR N"
+                for carbon in n.get_neighbors("C"):
+                    if ":H3" in carbon.topological_tags:
+                        carbon.classification = "amine NRR C"
+                        for hydrogen in carbon.get_neighbors("H"):
+                            hydrogen.classification = "amine NRR CH3 H"
 
         # gathers tags based on already computed info
         for atom in self.atoms:
 
-            # only for carbons conjugated with carbons
-            if atom.hybridization == "sp2":
-                if sum((a.hybridization == "sp2") and (a.type.real == "C")
-                       for a in atom.neighbors) > 1:
+            if atom.hybridization in ["sp2", "sp"]:
+
+                # four atoms in a row
+                first_neighbors = 0
+                second_neighbors = 0
+                for n1 in atom.neighbors:
+                    if n1.hybridization in ["sp2", "sp"]:
+                        first_neighbors += 1
+                        for n2 in n1.neighbors:
+                            if n2 is not atom:
+                                if n2.hybridization in ["sp2", "sp"]:
+                                    second_neighbors += 1
+                if first_neighbors >= 2 and second_neighbors >= 1:
                     atom.topological_tags.add("conjugated")
+
                     for a in atom.neighbors:
                         # this is necessary at the edges
-                        if a.hybridization == "sp2":
+                        if a.hybridization in ["sp2", "sp"]:
                             a.topological_tags.add("conjugated")
 
             # adds tags like ":H2", ":O1"
@@ -1126,6 +1320,12 @@ class Atoms:
                 else:
                     atom.topological_tags.add("-N")
 
+            for other in atom.get_neighbors("S"):
+                if (atom.hybridization == "sp2") and (other.hybridization == "sp2"):
+                    atom.topological_tags.add("=S")
+                else:
+                    atom.topological_tags.add("-S")
+
         # clears
         for atom in self.atoms:
             atom.classification = None
@@ -1138,6 +1338,12 @@ class Atoms:
                 continue
             if atom.type.real != "C":
                 continue
+
+            elif "=S" in atom.topological_tags:
+                s = atom.get_neighbors("S")[0]
+                if len(s.neighbors) == 1:
+                    atom.classification = "C=S C"
+                    # S is classified later
 
             # CARBONATE
             elif ":O3" in atom.topological_tags:
@@ -1239,6 +1445,11 @@ class Atoms:
                 if n.hybridization == "sp":
                     atom.classification = "cyanide C"
                     n.classification = "cyanide N"
+                elif ":O2" in n.topological_tags:
+                    atom.classification = "nitro C"
+                    n.classification = "nitro N"
+                    for o in n.get_neighbors("O"):
+                        o.classification = "nitro O"
 
                 # AMINE
                 else:
@@ -1334,7 +1545,8 @@ class Atoms:
                                 h.classification = "ether C H"
                     elif atom.hybridization == "sp2":
                         atom.classification = "CX sp2 C"
-                        atom.get_neighbors("H")[0].classification = "sp2 CHR H"
+                        for h in atom.get_neighbors("H"):
+                            h.classification = "sp2 CHR H"
 
             # FLUOR HALOALKANES
             elif ":F1" in atom.topological_tags:
@@ -1361,12 +1573,19 @@ class Atoms:
             # HYDROCARBONS
             if atom.classification is None:
                 if atom.hybridization == "sp":
-                    if ":H1" in atom.topological_tags:
-                        atom.classification = "CH sp C"
-                        atom.get_neighbors("H")[0].classification = "sp CH H"
+                    if "conjugated" in atom.topological_tags:
+                        if ":H1" in atom.topological_tags:
+                            atom.classification = "CH sp C"
+                            atom.get_neighbors("H")[0].classification = "sp CH H"
+                        else:
+                            atom.classification = "conjugated sp C"
                     else:
-                        atom.classification = "sp C"
-                        # should this be more specific?
+                        if ":H1" in atom.topological_tags:
+                            atom.classification = "CH sp C"
+                            atom.get_neighbors("H")[0].classification = "sp CH H"
+                        else:
+                            atom.classification = "sp C"
+                            # should this be more specific?
                 elif atom.hybridization == "sp2":
                     if "conjugated" in atom.topological_tags:
                         if ":H2" in atom.topological_tags:
@@ -1443,6 +1662,15 @@ class Atoms:
                 if ":H1" in atom.topological_tags:
                     atom.classification = "H2 H"
                     continue
+                elif ":O1" in atom.topological_tags:
+                    atom.classification = "hydroxyl H"
+                    atom.get_neighbors("O")[0].classification = "hydroxyl O"
+                    continue
+                elif ":P1" in atom.topological_tags:
+                    atom.classification = "PH H"
+                elif ":S1" in atom.topological_tags:
+                    atom.classification = "SH H"
+
                 c = atom.get_neighbors("C")
                 if c:
                     c = c[0]
@@ -1484,27 +1712,64 @@ class Atoms:
                         atom.classification = "NH2N N"
                         for h in atom.get_neighbors("H"):
                             h.classification = "NH2N H"
+                elif len(atom.neighbors) == 2:  # amber
+                    atom.classification = "two-neighbor N"
+                    for h in atom.get_neighbors("H"):
+                        h.classification = "NH H"
 
             elif atom.type.real == "O":
                 if ":H2" in atom.topological_tags:  # water
                     atom.classification = "H2O O"
                     for h in atom.get_neighbors("H"):
                         h.classification = "H2O H"
+                elif ":S1" in atom.topological_tags:
+                    atom.classification = "SO O"
+                elif ":P1" in atom.topological_tags:
+                    if ":C1" in atom.topological_tags:
+                        atom.classification = "POC O"
+                    else:
+                        atom.classification = "PO O"
 
             elif atom.type.real == "S":
+
+                # these are very charmm-based
                 if ":O4" in atom.topological_tags:
                     atom.classification = "SO4 S"
                     for o in atom.get_neighbors("O"):
                         o.classification = "SO4 =O"
                 elif ":S1" in atom.topological_tags:
                     atom.classification = "CSSC S"
-                elif ":H1" in atom.topological_tags:
+
+                # these are MOSTLY amber-based
+                elif len(atom.neighbors) == 1:
+                    for n in atom.neighbors:
+                        if "=S" in n.topological_tags:
+                            atom.classification = "two-neighbor S"
+                        else:
+                            atom.classification = "one-neighbor S"
+                elif len(atom.neighbors) == 2:
+                    if ":C2" in atom.topological_tags:
+                        atom.classification = "CSC S"
+                    else:
+                        atom.classification = "two-neighbor S"
+                elif len(atom.neighbors) == 3:
+                    if "conjugated" in atom.topological_tags:
+                        atom.classification = "three-neighbor conjugated S"
+                    else:
+                        atom.classification = "three-neighbor S"
+                elif len(atom.neighbors) == 4:
+                    if "conjugated" in atom.topological_tags:
+                        atom.classification = "four-neighbor conjugated S"
+                    else:
+                        atom.classification = "four-neighbor S"
+
+                if ":H1" in atom.topological_tags:
                     atom.classification = "SH S"
                     atom.get_neighbors("H")[0].classification = "SH H"
-                elif ":C2" in atom.topological_tags:
-                    atom.classification = "CSC S"
 
             elif atom.type.real == "P":
+
+                # these are very charmm-based
                 if ":O4" in atom.topological_tags:
                     if any(":P2" in o.topological_tags
                            for o in atom.get_neighbors("O")):
@@ -1513,6 +1778,32 @@ class Atoms:
                         atom.classification = "PO4 P"
                     for o in atom.get_neighbors("O"):
                         o.classification = "PO4 =O"
+
+                # these are very amber-based
+                elif len(atom.neighbors) == 2:
+                    if "conjugated" in atom.topological_tags:
+                        atom.classification = "conjugated P"
+                    else:
+                        atom.classification = "two-neighbor P"
+                elif len(atom.neighbors) == 3:
+                    if ("=O" in atom.topological_tags) or ("=S" in atom.topological_tags):
+                        if "conjugated" in atom.topological_tags:
+                            atom.classification = "three-neighbor conjugated P=O P"
+                        else:
+                            atom.classification = "three-neighbor P=O P"
+                    else:
+                        atom.classification = "three-neighbor P"
+                elif len(atom.neighbors) == 4:
+                    if "conjugated" in atom.topological_tags:
+                        atom.classification = "four-neighbor conjugated P"
+                    else:
+                        atom.classification = "four-neighbor P"
+                # if any(c.is_planar for c in atom.cycles):  # overrides
+                #     atom.classification = "aromatic P"
+
+            elif atom.type.real == "Si":
+                for o in atom.get_neighbors("O"):
+                    o.classification = "SiO O"
 
             elif atom.type.real == "Al":
                 if ":F4" in atom.topological_tags:
@@ -1528,6 +1819,9 @@ class Atoms:
                 continue
 
             if atom.type.real == "C":
+
+                # for systems with materials, e.g. nano threads, do continue:
+                # continue
 
                 if ("cycle 5" in atom.topological_tags and
                         "cycle 3" in atom.topological_tags):
@@ -1549,9 +1843,18 @@ class Atoms:
                 elif "cycle 3" in atom.topological_tags:
                     if len(atom.cycles) == 1:
                         if all(a.type.real == "C" for a in atom.cycles[0]):
-                            atom.classification = "cyclopropyl C"
+                            if atom.hybridization == "sp3":
+                                atom.classification = "3-ring sp3 C"
+                            elif atom.hybridization == "sp2":
+                                atom.classification = "3-ring sp2 C"
 
-                # note: C for 4-members cycle was reserved, but we ignore it
+                elif "cycle 4" in atom.topological_tags:
+                    if len(atom.cycles) == 1:
+                        if all(a.type.real == "C" for a in atom.cycles[0]):
+                            if atom.hybridization == "sp3":
+                                atom.classification = "4-ring sp3 C"
+                            elif atom.hybridization == "sp2":
+                                atom.classification = "4-ring sp2 C"
 
                 elif "cycle 5" in atom.topological_tags:
                     # CARE with 5-members cycles with N
@@ -1622,14 +1925,19 @@ class Atoms:
                         for h in atom.get_neighbors("H"):
                             h.classification = "6-ring planar XC H"
                     elif any(("cycle 6" in a.topological_tags) and
-                             (a.cycles[0] is not atom.cycles[0])
-                             for a in atom.get_neighbors("C")):
+                             (a.cycles[0] is not atom.cycles[0]) and
+                             len(atom.cycles) == 1 and
+                             len(a.cycles) == 1
+                             for a in atom.neighbors):
                         atom.classification = "biphenyl C"
                     elif any(("=O" in a.topological_tags) and
                              (a.type.real == "C") for
                              a in planar_six_cycle.atoms):
                         # CARE with the resonances in this case
                         atom.classification = "6-ring aromatic with C=O C"
+                        for h in atom.get_neighbors("H"):
+                            continue
+                            h.classification = "6-ring aromatic H"
                     elif ":N1" in atom.topological_tags:
                         atom.classification = "6-ring aromatic CN C"
                         for h in atom.get_neighbors("H"):
@@ -1707,20 +2015,24 @@ class Atoms:
             elif atom.type.real == "O":
 
                 if "cycle 5" in atom.topological_tags:
-                    if all(a.hybridization == "sp2" for a in atom.neighbors):
-                        atom.classification = "furan O"
+                    if atom.cycles[0].is_planar:
+                        atom.classification = "furan O"  # aromatic
                     else:
                         atom.classification = "5-ring ether O"
 
                 elif "cycle 6" in atom.topological_tags:
-                    if all(a.hybridization == "sp2" for a in atom.neighbors):
-                        atom.classification = "pyran O"
+                    if any(a.hybridization == "sp2" for a in atom.neighbors):
+                        atom.classification = "pyran O"  # non-aromatic
                     else:
                         atom.classification = "6-ring ether O"
 
             elif atom.type.real == "S":
-                if any((len(c) == 5) and c.is_planar for c in atom.cycles):
-                    atom.classification = "thiophene S"
+                if atom.cycles[0].is_planar:
+                    atom.classification = "aromatic S"
+
+            elif atom.type.real == "P":
+                if atom.cycles[0].is_planar:
+                    atom.classification = "aromatic P"
 
         # forth round, no specific classifications
         for atom in self.atoms:
@@ -1782,7 +2094,7 @@ class Atoms:
             print("{}: {}".format(key, self.__dict__[key]))
 
     def count(self, atom_type):
-        pass  # in the future maybe
+        return sum([atom.type == atom_type for atom in self.atoms])
 
     def add_atom(self, atom: Atom):
         """
@@ -1841,6 +2153,11 @@ class Atoms:
         for atom in self.atoms:
             atom.rotate(angle, axis)
 
+    def rotate_general(self, angle: float, vector):
+        """NOT WORKING !!!"""
+        for atom in self.atoms:
+            atom.rotate_general(angle, vector)
+
     def geometric_center(self):
         """Returns the geometric center of all atoms."""
         geometric_center = np.array([0.0, 0.0, 0.0])
@@ -1848,6 +2165,16 @@ class Atoms:
             geometric_center += atom.position
         geometric_center /= len(self.atoms)
         return geometric_center
+
+    def mass_center(self):
+        """Returns the center of mass of all atoms."""
+        mass_center = np.array([0.0, 0.0, 0.0])
+        total_mass = 0.0
+        for atom in self.atoms:
+            mass_center += atom.position * atom.mass
+            total_mass += atom.mass
+        mass_center /= total_mass
+        return mass_center
 
     def rotate_around_self(self, angle: float, axis: str):
         """
@@ -2215,6 +2542,16 @@ class Bond(TopologicalStructure):
         except KeyError:
             self.type = BondType(bond_type_str)
 
+    def set_length(self, new_length):
+        unit_vector = self.distance_vector(1, 2) / self.distance_scalar(1, 2)
+        wanted_vector = new_length * unit_vector
+        if len(self.atoms[0].neighbors) == 1:
+            self.atoms[0].position = self.atoms[1].position - wanted_vector
+        elif len(self.atoms[1].neighbors) == 1:
+            self.atoms[1].position = self.atoms[0].position + wanted_vector
+        else:
+            print("Can't set bond length!")
+
 
 class Angle(TopologicalStructure):
     """Class for angles among three atoms."""
@@ -2230,7 +2567,12 @@ class Angle(TopologicalStructure):
 
     @property
     def angle(self):
-        return NotImplemented
+        v1 = self.atoms[0].position - self.atoms[1].position
+        v2 = self.atoms[2].position - self.atoms[1].position
+        cos = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+        angle = np.arccos(cos)
+        angle /= np.pi / 180.0  # rad to deg
+        return angle
 
     @property
     def position(self):
@@ -2254,6 +2596,24 @@ class Angle(TopologicalStructure):
             self.type = AngleType.instances_dict[angle_type_str]
         except KeyError:
             self.type = AngleType(angle_type_str)
+
+    def set_angle(self, wanted_angle: float):  # DEGREES
+        if len(self.atoms[0].neighbors) > 1 or len(self.atoms[2].neighbors) > 1:
+            print("Can't set angle value!")
+        else:  # moves the third atom
+            real_distance = self.distance_scalar(2, 3)
+            move_vector = self.distance_vector(1, 3)
+            move_unit = move_vector / np.linalg.norm(move_vector)
+            move_step = move_unit / 2000  # 0.0005 angstrom
+            while True:
+                if round(wanted_angle, 2) - round(self.angle, 2) > 0.02:
+                    self.atoms[2].position += move_step
+                elif round(wanted_angle, 2) - round(self.angle, 2) < -0.02:
+                    self.atoms[2].position -= move_step
+                else:
+                    break
+                # print(self.angle)
+            self.atoms[2].bonds[0].set_length(real_distance)
 
 
 class Dihedral(TopologicalStructure):
@@ -2362,6 +2722,7 @@ class Cycle(TopologicalStructure):
     def __init__(self, atoms: list):
         super().__init__(atoms)
         self.is_planar = False
+        self.is_heterocycle = False
 
     def __eq__(self, other):
         return set(self[:]) == set(other[:])
@@ -2427,10 +2788,10 @@ class TopologicalType:
         return self.list[index_or_slice]
 
     def __str__(self):
-        return self.__repr__()
+        return ":".join([str(typ) for typ in self.list])
 
     def __repr__(self):
-        return self.string
+        return self.__str__()
 
     @classmethod
     def types(cls):
@@ -2479,40 +2840,63 @@ class AtomType(TopologicalType):
         self.add_instance(self)
 
         try:
-            self.mass = ATOMIC_MASSES[self.string]
-        except KeyError:  # happens when e.g. "C1" is given for "C"
+            self.mass = ATOMIC_MASSES[self.string]  # "C" for "C"
+
+        # the following is an attempt to find out what real type it is
+        # CARE: might go terribly wrong
+
+        except KeyError:
             real_type = ""
             for char in self.string:
                 if char.isalpha():
                     real_type += char
                 else:
                     break
-            try:
+            try:  # "C1" for "C"
                 self.mass = ATOMIC_MASSES[real_type]
                 self.real = real_type
-            except KeyError:  # happens when e.g. "CG321" is given for "C"
 
-                # the following is an attempt to find out what real type it is
-                # CARE: might go terribly wrong
+            except KeyError:
 
-                try:  # works for e.g. "AL" for "Al"
-                    real_type = self.string[0].upper() + self.string[1].lower()
-                    self.mass = ATOMIC_MASSES[real_type]
-                    self.real = real_type
-                except KeyError:  # works for e.g. "CG321" for "C"
-                    try:
+                if len(self.string) == 1:
+                    try:  # "c" for "C"
                         real_type = self.string[0].upper()
                         self.mass = ATOMIC_MASSES[real_type]
                         self.real = real_type
                     except KeyError:
-                        if self.string == "Atom":
-                            self.mass = 1.0
-                        else:
-                            print("WARNING: can't find the real type of "
-                                  "{}".format(self.string))
-                            self.mass = 1.0
-                except IndexError:  # if type is very strange
-                    self.mass = 1.0  # probably a dummy type
+                        pass
+
+                # AMBER Force Field
+                elif all(char.islower for char in self.string):
+                    if self.string in ["cl", "br"]:
+                        pass
+                    else:
+                        try:  # "na" for "N"
+                            real_type = self.string[0].upper()
+                            self.mass = ATOMIC_MASSES[real_type]
+                            self.real = real_type
+                        except KeyError:
+                            pass
+
+                else:
+                    try:  # "AL" for "Al", "br" for "Br"
+                        real_type = self.string[0].upper() + self.string[1].lower()
+                        self.mass = ATOMIC_MASSES[real_type]
+                        self.real = real_type
+                    except KeyError:
+                        try:  # "CG321" for "C"
+                            real_type = self.string[0].upper()
+                            self.mass = ATOMIC_MASSES[real_type]
+                            self.real = real_type
+                        except KeyError:
+                            if self.string == "Atom":
+                                self.mass = 1.0
+                            else:
+                                print("WARNING: can't find the real type of "
+                                      "{}".format(self.string))
+                                self.mass = 1.0
+                    except IndexError:  # if type is very strange
+                        self.mass = 1.0  # probably a dummy type
 
     def __str__(self, real_type=False):
         if real_type:
@@ -2551,8 +2935,13 @@ class BondType(TopologicalType):
         self.bond_order = 1
 
         # force field parameters
-        self.k = None
+        self.k = None  # works as k2
         self.r0 = None
+        self.k3 = None
+        self.k4 = None
+
+        self.increment = None  # COMPASS
+        self.first_atom = None  # for positive increment
 
         self.add_instance(self)
 
@@ -2577,6 +2966,12 @@ class BondType(TopologicalType):
             cls.instances_dict[":".join(str(typ) for typ
                                         in instance.list[::-1])] = instance
 
+    def class2_order(self):
+        # needed for class2 bond increments
+        typ1, typ2 = tuple(self.list)
+        if typ1 != self.first_atom:
+            self.list = [typ2, typ1]
+
 
 class AngleType(TopologicalType):
     """Class for angle types, e.g. 'H:C:H' or 'C1:C8:C2'."""
@@ -2592,11 +2987,24 @@ class AngleType(TopologicalType):
             raise TypeError("AngleType must be order 3, got string "
                             "{}".format(self.string))
 
+        self.class2_order()
+
         # force field parameters
         self.k = None
         self.theta0 = None
-        self.k_ub = None
-        self.r_ub = None
+        self.k_ub = 0.0
+        self.r_ub = 0.0
+        self.k3 = None
+        self.k4 = None
+
+        # cross pars for class2 ffs like compass
+        self.bb = None  # BondBond parameters
+        self.ba = None  # BondAngle parameters
+        self.ij_jk = 0.0  # bond bond
+        self.ij_ijk = 0.0  # bond angle
+        self.jk_ijk = 0.0  # bond angle
+        self.r1 = None  # of ij bond
+        self.r2 = None  # of jk bond
 
         self.add_instance(self)
 
@@ -2622,6 +3030,12 @@ class AngleType(TopologicalType):
             cls.instances_dict[":".join(str(typ) for typ
                                         in instance.list[::-1])] = instance
 
+    def class2_order(self):
+        # this is needed for class2 FFs; irrelevant otherwise
+        typ1, typ2, typ3 = tuple(self.list)
+        if str(typ1) > str(typ3):
+            self.list = [typ3, typ2, typ1]
+
 
 class DihedralType(TopologicalType):
     """Class for (proper) dihedral types, e.g. 'H:C:C:C'."""
@@ -2637,10 +3051,50 @@ class DihedralType(TopologicalType):
             raise TypeError("DihedralType must be order 4, got string "
                             "{}".format(self.string))
 
+        self.class2_order()
+
         # force field parameters
         self.k = None
         self.n = None
         self.d = None
+        self.k2 = None
+        self.k3 = None
+        self.phi1 = 0.0
+        self.phi2 = 0.0
+        self.phi3 = 0.0
+
+        self.wildcard = False
+        self.amber_improper = False  # TODO still needed?
+
+        # cross pars for class2 ffs like compass
+        self.mbt = None  # MiddleBondTorsion parameters
+        self.ebt = None  # EndBondTorsion parameters
+        self.at = None  # AngleTorsion parameters
+        self.aat = None  # AngleAngleTorsion parameters
+        self.bb13 = None  # BondBond13 parameters
+        # self.ijk_jkl = 0.0  # angle angle
+        self.ij_ijkl_jkl = 0.0  # angle angle torsion
+        self.a1 = 0.0  # k1 for middle bond torsion
+        self.a2 = 0.0  # k2 for middle bond torsion
+        self.a3 = 0.0  # k3 for middle bond torsion
+        self.b1 = 0.0  # k1 for ij-ijkl
+        self.b2 = 0.0  # k2 for ij-ijkl
+        self.b3 = 0.0  # k3 for ij-ijkl
+        self.c1 = 0.0  # k1 for kl-ijkl
+        self.c2 = 0.0  # k2 for kl-ijkl
+        self.c3 = 0.0  # k3 for kl-ijkl
+        self.d1 = 0.0  # k1 for ijk-ijkl
+        self.d2 = 0.0  # k2 for ijk-ijkl
+        self.d3 = 0.0  # k3 for ijk-ijkl
+        self.e1 = 0.0  # k1 for jkl-ijkl
+        self.e2 = 0.0  # k2 for jkl-ijkl
+        self.e3 = 0.0  # k3 for jkl-ijkl
+        self.n = 0.0  # N for BondBond13
+        self.r1 = None
+        self.r2 = None
+        self.r3 = None
+        self.theta1 = None
+        self.theta2 = None
 
         self.add_instance(self)
 
@@ -2666,6 +3120,14 @@ class DihedralType(TopologicalType):
             cls.instances_dict[":".join(str(typ) for typ
                                         in instance.list[::-1])] = instance
 
+    def class2_order(self):
+        # this is needed for class2 FFs; irrelevant otherwise
+        typ1, typ2, typ3, typ4 = tuple(self.list)
+        if str(typ1) > str(typ4):
+            self.list = [typ4, typ3, typ2, typ1]
+        elif (str(typ1) == str(typ4)) and (str(typ2) > str(typ3)):
+            self.list = [typ4, typ3, typ2, typ1]
+
 
 class ImproperType(TopologicalType):
     """Class for improper dihedral types, e.g. 'C:O:H:H' (central C)."""
@@ -2684,6 +3146,18 @@ class ImproperType(TopologicalType):
         # force field parameters
         self.k = None
         self.x0 = 0
+        self.n = None
+        self.d = 1
+        self.wildcard = False
+
+        self.aa = None  # AngleAngle parameters
+        # self.ijk_jkl = 0.0  # angle angle
+        self.m1 = 0.0  # k1 for AngleAngle
+        self.m2 = 0.0  # k2 for AngleAngle
+        self.m3 = 0.0  # k3 for AngleAngle
+        self.theta1 = 0.0  # ijk angle for AngleAngle
+        self.theta2 = 0.0  # ijl angle for AngleAngle
+        self.theta3 = 0.0  # kjl angle for AngleAngle
 
         self.add_instance(self)
 
@@ -2732,3 +3206,11 @@ class ImproperType(TopologicalType):
                                          str(a2)])] = instance
             cls.instances_dict[":".join([str(a0), str(a3), str(a2),
                                          str(a1)])] = instance
+
+    @property
+    def compass_order(self):
+        """Returns a string for the improper dihedral with the central
+        atom in the second position, as for COMPASS."""
+        a0, a1, a2, a3 = self.list[0], self.list[1], \
+                         self.list[2], self.list[3]
+        return ":".join([str(a1), str(a0), str(a2), str(a3)])
