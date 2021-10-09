@@ -3,7 +3,7 @@
 """Quick functions for generating LAMMPS Data files."""
 
 from constants import PACKAGE_DIR
-from files.ff import CharmmGeneral, GeneralAmber, Dreiding, DPD
+from files.ff import CharmmGeneral, GeneralAmber, Compass
 from files.lmp import LmpDat
 
 
@@ -58,7 +58,8 @@ def write_lmpdat_charmm(xyz_file: str, lmpdat_file: str, par_file=None,
     if par_file is None:
         par_file = xyz_file.replace(".xyz", "(computed_parameters).par")
     charmm.write_par(xyz_file.replace(".xyz", "(computed_parameters).par"))
-    charmm.atoms.write_xyz(xyz_file.replace(".xyz", ".types.xyz"))
+    charmm.atoms.write_xyz(xyz_file.replace(".xyz", ".types.xyz"),
+                           with_classification=True)
 
     input("Press anything when the par file is ready.")
 
@@ -72,7 +73,7 @@ def write_lmpdat_charmm(xyz_file: str, lmpdat_file: str, par_file=None,
 def write_lmpdat_amber(xyz_file: str, lmpdat_file: str, par_file=None,
                        periodic="", simple=False):
     """
-
+    Mostly done. Only improper dihedrals missing.
     """
 
     periodic = periodic.lower()
@@ -96,28 +97,48 @@ def write_lmpdat_amber(xyz_file: str, lmpdat_file: str, par_file=None,
     lmp.write_lmpdat(lmpdat_file)
 
 
-def write_lmpdat_dreiding(xyz_file: str, lmpdat_file: str, par_file=None,
-                          periodic="", simple=False):
-    """
+def write_lmpdat_compass(xyz_file: str, lmpdat_file: str, par_file=None,
+                         periodic="", simple=False):
 
     """
+    UNDER DEVELOPMENT!
+    """
+
+    # gambiarra to fix my input xyz file
+    pdms = True
 
     periodic = periodic.lower()
 
-    dreiding = Dreiding(xyz_file=xyz_file)
-    dreiding.compute_topology(periodic=periodic, simple=simple)
+    compass = Compass(xyz_file=xyz_file)
+
+    if pdms:
+        for atom in compass.atoms:
+            if atom.type == "S":
+                atom.type = "Si"
+
+    compass.compute_topology(periodic=periodic, simple=simple)
+    #compass.order_in_bonds()
     if par_file is None:
-        par_file = xyz_file.replace(".xyz", "(computed_parameters).par")
-    dreiding.write_par(xyz_file.replace(".xyz", "(computed_parameters).par"))
-    dreiding.atoms.write_xyz(xyz_file.replace(".xyz", ".types.xyz"))
+        par_file = xyz_file.replace(".xyz", ".par")
+    compass.write_par(xyz_file.replace(".xyz", ".par"))
+    compass.atoms.write_xyz(xyz_file.replace(".xyz", ".types.xyz"),
+                            with_classification=True)
 
     input("Press anything when the par file is ready.")
 
-    # lmp = LmpDat()
-    # lmp.atoms = amber.atoms
-    # lmp.get_params(par_file)
-    # lmp.cell_to_lo_hi()
-    # lmp.write_lmpdat(lmpdat_file)
+    lmp = LmpDat()
+    lmp.atoms = compass.atoms
+    compass.order_in_bonds()
+    lmp.get_params(par_file)
+
+    # COMPASS-specific adjustments; all are necessary!
+    compass.order_in_bonds()
+    compass.increment_charges()
+    compass.order_in_angles()
+    compass.order_in_dihedrals()
+
+    lmp.cell_to_lo_hi()
+    lmp.write_lmpdat(lmpdat_file)
 
 
 def finish_lmpdat(xyz_types_file: str, lmpdat_file: str, par_file: str,
@@ -166,23 +187,3 @@ def finish_lmpdat(xyz_types_file: str, lmpdat_file: str, par_file: str,
     lmp.atoms.compute_topology(periodic=periodic, simple=simple)
     lmp.get_params(par_file)
     lmp.write_lmpdat(lmpdat_file)
-
-
-def write_lmpdat_dpd(xyz_file: str, lmpdat_file: str, coef_file: str,
-                        par_file=None, periodic="", simple=False):
-    """"""
-    dpd = DPD(coef_file=coef_file, xyz_file=xyz_file)
-    dpd.compute_topology(periodic=periodic, simple=simple)
-    if par_file is None:
-        par_file = xyz_file.replace(".xyz", "(computed_parameters).par")
-    dpd.write_par(xyz_file.replace(".xyz", "(computed_parameters).par"))
-    dpd.atoms.write_xyz(xyz_file.replace(".xyz", ".types.xyz"))
-
-    input("Press anything when the par file is ready.")
-
-    sp = LmpDat()
-    sp.atoms = dpd.atoms
-    sp.get_params(par_file)
-    sp.cell_to_lo_hi()
-    sp.write_lmpdat(lmpdat_file, atom_style='bond', comments=True)
-    dpd.lmp_complement(lmpdat_file)

@@ -1,6 +1,4 @@
-# Copyright 2019 Pedro G. Demingos
-
-"""Deals with some constants and other informations."""
+"""Deals with some constants and other information."""
 
 from os.path import dirname, abspath
 PACKAGE_DIR = dirname(abspath(__file__))

@@ -1,6 +1,6 @@
 """Example 03: Writing LAMMPS Data File for a periodic system"""
 
-from quick import write_lmpdat
+from quick import write_lmpdat_charmm
 
 # path to the xyz file
 from constants import PACKAGE_DIR  # just the package directory
@@ -17,7 +17,7 @@ xyz = PACKAGE_DIR + "/examples/rubber.xyz"
 # path where the LAMMPS Data File will be writen
 lmp = PACKAGE_DIR + "/examples/rubber.lmp"
 
-write_lmpdat(xyz, lmp, periodic="xyz")
+write_lmpdat_charmm(xyz, lmp, periodic="xyz")
 
 # notice that now we specify that the system is periodic in all directions
 #
