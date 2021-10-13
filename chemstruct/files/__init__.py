@@ -1,2 +1,0 @@
-"""Classes for manipulating files."""
-
